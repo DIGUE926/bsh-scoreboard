@@ -19,6 +19,8 @@ export default function NouveauMatchPage() {
   const [teams, setTeams] = useState<Team[]>([]);
   const [homeTeam, setHomeTeam] = useState("");
   const [awayTeam, setAwayTeam] = useState("");
+  const [homeTeamNewName, setHomeTeamNewName] = useState("");
+  const [awayTeamNewName, setAwayTeamNewName] = useState("");
   const [gameDate, setGameDate] = useState("");
   const [phase, setPhase] = useState("Saison régulière");
   const [error, setError] = useState<string | null>(null);
@@ -60,29 +62,56 @@ export default function NouveauMatchPage() {
     setLeagueId(id);
     setHomeTeam("");
     setAwayTeam("");
+    setHomeTeamNewName("");
+    setAwayTeamNewName("");
+  }
+
+  // Crée une équipe à la volée (nom tapé à la main, ex. "Team A" pour un
+  // essai) -- pratique pour tester l'app sans dépendre des vraies équipes.
+  // Sans joueurs : utilisable pour programmer un match, mais /demarrer
+  // ne pourra pas demander de titulaires pour ce côté.
+  async function resolveTeamId(
+    selected: string,
+    newName: string
+  ): Promise<{ id: string; league_id: string } | null> {
+    if (selected !== "__new__") {
+      const team = teams.find((t) => t.id === selected);
+      return team ? { id: team.id, league_id: team.league_id } : null;
+    }
+    if (!newName.trim()) return null;
+    const { data, error } = await supabase
+      .from("teams")
+      .insert({ name: newName.trim(), league_id: leagueId })
+      .select("id, league_id")
+      .single();
+    if (error || !data) return null;
+    return data;
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
 
-    if (homeTeam === awayTeam) {
+    if (homeTeam === awayTeam && homeTeam !== "__new__") {
       setError("Les deux équipes doivent être différentes.");
       return;
     }
 
     setLoading(true);
 
-    const { data: homeTeamData } = await supabase
-      .from("teams")
-      .select("league_id")
-      .eq("id", homeTeam)
-      .single();
+    const home = await resolveTeamId(homeTeam, homeTeamNewName);
+    const away = await resolveTeamId(awayTeam, awayTeamNewName);
+
+    if (!home || !away) {
+      setLoading(false);
+      setError("Choisis ou nomme les deux équipes.");
+      return;
+    }
 
     const { error } = await supabase.from("games").insert({
-      league_id: homeTeamData?.league_id,
-      home_team_id: homeTeam,
-      away_team_id: awayTeam,
+      league_id: home.league_id,
+      home_team_id: home.id,
+      away_team_id: away.id,
       game_date: gameDate,
       phase,
       status: "scheduled",
@@ -139,12 +168,23 @@ export default function NouveauMatchPage() {
             className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2 focus:border-bsh-orange outline-none"
           >
             <option value="">Sélectionner...</option>
+            <option value="__new__">+ Nouvelle équipe (test)</option>
             {leagueTeams.map((t) => (
               <option key={t.id} value={t.id}>
                 {t.name}
               </option>
             ))}
           </select>
+          {homeTeam === "__new__" && (
+            <input
+              type="text"
+              value={homeTeamNewName}
+              onChange={(e) => setHomeTeamNewName(e.target.value)}
+              placeholder="ex: Team A"
+              required
+              className="w-full mt-2 bg-white/5 border border-bsh-orange/40 rounded-lg px-4 py-2 focus:border-bsh-orange outline-none"
+            />
+          )}
         </div>
 
         <div>
@@ -158,12 +198,23 @@ export default function NouveauMatchPage() {
             className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2 focus:border-bsh-orange outline-none"
           >
             <option value="">Sélectionner...</option>
+            <option value="__new__">+ Nouvelle équipe (test)</option>
             {leagueTeams.map((t) => (
               <option key={t.id} value={t.id}>
                 {t.name}
               </option>
             ))}
           </select>
+          {awayTeam === "__new__" && (
+            <input
+              type="text"
+              value={awayTeamNewName}
+              onChange={(e) => setAwayTeamNewName(e.target.value)}
+              placeholder="ex: Team B"
+              required
+              className="w-full mt-2 bg-white/5 border border-bsh-orange/40 rounded-lg px-4 py-2 focus:border-bsh-orange outline-none"
+            />
+          )}
         </div>
 
         <div>

@@ -16,6 +16,8 @@ export default function DemarrerMatchForm() {
   const [teams, setTeams] = useState<Team[]>([]);
   const [homeTeamId, setHomeTeamId] = useState("");
   const [awayTeamId, setAwayTeamId] = useState("");
+  const [homeTeamNewName, setHomeTeamNewName] = useState("");
+  const [awayTeamNewName, setAwayTeamNewName] = useState("");
   const [homePlayers, setHomePlayers] = useState<Player[]>([]);
   const [awayPlayers, setAwayPlayers] = useState<Player[]>([]);
   const [homeStarters, setHomeStarters] = useState<Set<string>>(new Set());
@@ -59,6 +61,8 @@ export default function DemarrerMatchForm() {
     setLeagueId(id);
     setHomeTeamId("");
     setAwayTeamId("");
+    setHomeTeamNewName("");
+    setAwayTeamNewName("");
     setHomePlayers([]);
     setAwayPlayers([]);
     setHomeStarters(new Set());
@@ -67,7 +71,7 @@ export default function DemarrerMatchForm() {
 
   function handleHomeTeamChange(id: string) {
     setHomeTeamId(id);
-    if (!id) {
+    if (!id || id === "__new__") {
       setHomePlayers([]);
       setHomeStarters(new Set());
     }
@@ -75,14 +79,14 @@ export default function DemarrerMatchForm() {
 
   function handleAwayTeamChange(id: string) {
     setAwayTeamId(id);
-    if (!id) {
+    if (!id || id === "__new__") {
       setAwayPlayers([]);
       setAwayStarters(new Set());
     }
   }
 
   useEffect(() => {
-    if (!homeTeamId) return;
+    if (!homeTeamId || homeTeamId === "__new__") return;
     supabase
       .from("players")
       .select("id, name, jersey_number")
@@ -95,7 +99,7 @@ export default function DemarrerMatchForm() {
   }, [homeTeamId, supabase]);
 
   useEffect(() => {
-    if (!awayTeamId) return;
+    if (!awayTeamId || awayTeamId === "__new__") return;
     supabase
       .from("players")
       .select("id, name, jersey_number")
@@ -120,31 +124,72 @@ export default function DemarrerMatchForm() {
     setter(next);
   }
 
-  const rostersLoaded = homeTeamId && awayTeamId && homeTeamId !== awayTeamId;
-  const readyToStart =
-    rostersLoaded && homeStarters.size === 5 && awayStarters.size === 5;
+  const isHomeNew = homeTeamId === "__new__";
+  const isAwayNew = awayTeamId === "__new__";
+  const rostersLoaded = homeTeamId !== "" && awayTeamId !== "";
+  const sameTeamConflict =
+    !isHomeNew && !isAwayNew && homeTeamId !== "" && homeTeamId === awayTeamId;
+  const homeReady = isHomeNew
+    ? homeTeamNewName.trim().length > 0
+    : homeTeamId !== "" && homeStarters.size === 5;
+  const awayReady = isAwayNew
+    ? awayTeamNewName.trim().length > 0
+    : awayTeamId !== "" && awayStarters.size === 5;
+  const readyToStart = homeReady && awayReady && !sameTeamConflict;
+
+  // Crée une équipe à la volée (nom tapé à la main, ex. "Team A" pour un
+  // essai) -- sans joueurs, donc pas de titulaires à choisir pour ce côté.
+  async function resolveTeam(
+    teamId: string,
+    newName: string
+  ): Promise<{ id: string; league_id: string } | null> {
+    if (teamId !== "__new__") {
+      const team = teams.find((t) => t.id === teamId);
+      return team ? { id: team.id, league_id: team.league_id } : null;
+    }
+    if (!newName.trim()) return null;
+    const { data, error } = await supabase
+      .from("teams")
+      .insert({ name: newName.trim(), league_id: leagueId })
+      .select("id, league_id")
+      .single();
+    if (error || !data) return null;
+    return data;
+  }
 
   async function handleStart() {
     setError(null);
 
-    if (homeTeamId === awayTeamId) {
+    if (sameTeamConflict) {
       setError("Les deux équipes doivent être différentes.");
       return;
     }
-    if (homeStarters.size !== 5 || awayStarters.size !== 5) {
-      setError("Choisis exactement 5 titulaires par équipe.");
+    if (!isHomeNew && homeStarters.size !== 5) {
+      setError("Choisis exactement 5 titulaires pour l'équipe à domicile.");
+      return;
+    }
+    if (!isAwayNew && awayStarters.size !== 5) {
+      setError("Choisis exactement 5 titulaires pour l'équipe visiteuse.");
       return;
     }
 
     setLoading(true);
-    const homeTeam = teams.find((t) => t.id === homeTeamId);
+
+    const home = await resolveTeam(homeTeamId, homeTeamNewName);
+    const away = await resolveTeam(awayTeamId, awayTeamNewName);
+
+    if (!home || !away) {
+      setLoading(false);
+      setError("Choisis ou nomme les deux équipes.");
+      return;
+    }
 
     const { data: game, error: gameError } = await supabase
       .from("games")
       .insert({
-        league_id: homeTeam?.league_id,
-        home_team_id: homeTeamId,
-        away_team_id: awayTeamId,
+        league_id: home.league_id,
+        home_team_id: home.id,
+        away_team_id: away.id,
         game_date: new Date().toISOString().slice(0, 10),
         phase: "Saison régulière",
         status: "live",
@@ -183,7 +228,9 @@ export default function DemarrerMatchForm() {
       })),
     ];
 
-    await supabase.from("player_game_stats").insert(starterRows);
+    if (starterRows.length > 0) {
+      await supabase.from("player_game_stats").insert(starterRows);
+    }
 
     router.push(`/match/${game.id}/live`);
   }
@@ -272,12 +319,22 @@ export default function DemarrerMatchForm() {
             className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2 focus:border-bsh-orange outline-none"
           >
             <option value="">Sélectionner...</option>
+            <option value="__new__">+ Nouvelle équipe (test)</option>
             {leagueTeams.map((t) => (
               <option key={t.id} value={t.id}>
                 {t.name}
               </option>
             ))}
           </select>
+          {isHomeNew && (
+            <input
+              type="text"
+              value={homeTeamNewName}
+              onChange={(e) => setHomeTeamNewName(e.target.value)}
+              placeholder="ex: Team A"
+              className="w-full mt-2 bg-white/5 border border-bsh-orange/40 rounded-lg px-4 py-2 focus:border-bsh-orange outline-none"
+            />
+          )}
         </div>
         <div>
           <label className="block text-sm text-white/60 mb-1">Équipe visiteuse</label>
@@ -287,16 +344,26 @@ export default function DemarrerMatchForm() {
             className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2 focus:border-bsh-orange outline-none"
           >
             <option value="">Sélectionner...</option>
+            <option value="__new__">+ Nouvelle équipe (test)</option>
             {leagueTeams.map((t) => (
               <option key={t.id} value={t.id}>
                 {t.name}
               </option>
             ))}
           </select>
+          {isAwayNew && (
+            <input
+              type="text"
+              value={awayTeamNewName}
+              onChange={(e) => setAwayTeamNewName(e.target.value)}
+              placeholder="ex: Team B"
+              className="w-full mt-2 bg-white/5 border border-bsh-orange/40 rounded-lg px-4 py-2 focus:border-bsh-orange outline-none"
+            />
+          )}
         </div>
       </div>
 
-      {homeTeamId && awayTeamId && homeTeamId === awayTeamId && (
+      {sameTeamConflict && (
         <p className="text-red-400 text-sm mb-4">
           Les deux équipes doivent être différentes.
         </p>
@@ -304,8 +371,20 @@ export default function DemarrerMatchForm() {
 
       {rostersLoaded && (
         <div className="grid grid-cols-2 gap-6 mb-6 max-w-2xl">
-          {renderRoster("home", homePlayers, homeStarters)}
-          {renderRoster("away", awayPlayers, awayStarters)}
+          {isHomeNew ? (
+            <p className="text-sm text-white/40">
+              Nouvelle équipe test, pas de joueurs -- juste le score sera suivi.
+            </p>
+          ) : (
+            renderRoster("home", homePlayers, homeStarters)
+          )}
+          {isAwayNew ? (
+            <p className="text-sm text-white/40">
+              Nouvelle équipe test, pas de joueurs -- juste le score sera suivi.
+            </p>
+          ) : (
+            renderRoster("away", awayPlayers, awayStarters)
+          )}
         </div>
       )}
 
