@@ -2,7 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import Link from "next/link";
 import QuickStartButton from "./QuickStartButton";
 import SignOutButton from "./SignOutButton";
-import { isLiveScoringEnabled } from "@/lib/settings";
+import { isLiveScoringEnabled, isScoreboardAhbbEnabled } from "@/lib/settings";
 
 export const dynamic = "force-dynamic";
 
@@ -16,15 +16,24 @@ export default async function Home() {
   } = await supabase.auth.getUser();
 
   const liveEnabled = await isLiveScoringEnabled();
+  // AHBB masquée par défaut -- gérée automatiquement par le scraper
+  // (ahbb-tracker), pas de saisie live manuelle nécessaire. Activable
+  // sans redéploiement via app_settings.scoreboard_ahbb_enabled.
+  const ahbbEnabled = await isScoreboardAhbbEnabled();
 
-  const { data: games } = await supabase
+  let gamesQuery = supabase
     .from("games")
     .select(
-      "*, home_team:home_team_id(name), away_team:away_team_id(name), league:league_id(slug)"
+      ahbbEnabled
+        ? "*, home_team:home_team_id(name), away_team:away_team_id(name), league:league_id(slug)"
+        : "*, home_team:home_team_id(name), away_team:away_team_id(name), league:league_id!inner(slug)"
     )
     .in("status", ["scheduled", "live"])
     .order("game_date", { ascending: true })
     .limit(20);
+  if (!ahbbEnabled) gamesQuery = gamesQuery.eq("league.slug", "suble");
+
+  const { data: games } = await gamesQuery;
 
   return (
     <div>

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import U20Badge from "@/app/U20Badge";
+import { isScoreboardAhbbEnabled } from "@/lib/settings";
 
 type Team = { id: string; name: string; league_id: string };
 type League = { id: string; name: string; slug: string };
@@ -26,11 +27,14 @@ export default function NouveauMatchPage() {
   const supabase = createClient();
 
   useEffect(() => {
+    // AHBB masquée par défaut -- gérée automatiquement par le scraper
+    // (ahbb-tracker), pas de saisie live manuelle nécessaire. Activable
+    // sans redéploiement via app_settings.scoreboard_ahbb_enabled.
     async function loadLeagues() {
-      const { data } = await supabase
-        .from("leagues")
-        .select("id, name, slug")
-        .order("name");
+      const ahbbEnabled = await isScoreboardAhbbEnabled();
+      let query = supabase.from("leagues").select("id, name, slug").order("name");
+      if (!ahbbEnabled) query = query.eq("slug", "suble");
+      const { data } = await query;
       if (data) {
         setLeagues(data);
         if (data.length > 0) setLeagueId(data[0].id);
