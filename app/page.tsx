@@ -42,6 +42,21 @@ export default async function Home() {
         </div>
       )}
 
+      <div className="flex gap-2 mb-6">
+        <Link
+          href="/demarrer"
+          className="flex-1 text-center bg-bsh-orange text-black font-bold rounded-lg px-3 py-2.5 text-sm hover:opacity-90 transition-opacity"
+        >
+          ● Démarrer un match
+        </Link>
+        <Link
+          href="/nouveau-match"
+          className="flex-1 text-center bg-white/10 text-white/80 font-bold rounded-lg px-3 py-2.5 text-sm hover:bg-white/20 transition-colors"
+        >
+          + Programmer un match
+        </Link>
+      </div>
+
       <div className="space-y-3">
         {games?.map((game) => (
           <div
