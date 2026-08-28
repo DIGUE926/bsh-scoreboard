@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>BSH Scoreboard | Hors ligne</title>
+<style>
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: #0D0D0D;
+    color: #fff;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+  }
+  .wrap { padding: 24px; }
+  .logo {
+    font-family: Georgia, serif;
+    font-weight: 900;
+    letter-spacing: -1px;
+    color: #FF6B00;
+    font-size: 40px;
+    margin: 0 0 12px;
+  }
+  p { color: rgba(255,255,255,0.6); margin: 0 0 20px; }
+  button {
+    background: #FF6B00;
+    color: #0D0D0D;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 20px;
+    font-weight: 700;
+    font-size: 14px;
+    cursor: pointer;
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <p class="logo">BSH SCORE</p>
+    <p>Pas de connexion internet pour le moment.<br />Reconnecte-toi pour continuer la saisie.</p>
+    <button onclick="location.reload()">Réessayer</button>
+  </div>
+</body>
+</html>

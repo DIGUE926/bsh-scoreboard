@@ -1,0 +1,26 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Montserrat", sans-serif;
+  --font-display: "Anton", sans-serif;
+
+  --color-bsh-orange: #FF6B00;
+  --color-bsh-black: #0D0D0D;
+  --color-bsh-gold: #FFD60A;
+}
+
+body {
+  background-color: var(--color-bsh-black);
+  color: #ffffff;
+  font-family: var(--font-sans);
+  min-height: 100vh;
+}
+
+select {
+  color-scheme: dark;
+}
+
+select option {
+  background-color: var(--color-bsh-black);
+  color: #ffffff;
+}
