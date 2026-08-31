@@ -111,14 +111,28 @@ export default function DemarrerMatchForm() {
       });
   }, [awayTeamId, supabase]);
 
+  // Nombre de titulaires exigé : 5 normalement, mais réduit à la taille de
+  // l'effectif si l'équipe a moins de 5 joueurs (ex. équipe de test créée à
+  // la volée pendant un match précédent, avec seulement 1-2 joueurs ajoutés
+  // via "+ Joueur"). Une équipe sans aucun joueur n'exige aucun titulaire,
+  // comme une équipe "__new__". Sans ça, une équipe existante avec moins de
+  // 5 joueurs ne pouvait plus jamais démarrer de match (retour Digue
+  // 2026-08-31 : "quand je clique sur equipe a et b jpeux pas commencer les
+  // matchs").
+  function requiredStarters(players: Player[]) {
+    return Math.min(5, players.length);
+  }
+
   function toggleStarter(side: "home" | "away", playerId: string) {
     const set = side === "home" ? homeStarters : awayStarters;
     const setter = side === "home" ? setHomeStarters : setAwayStarters;
+    const players = side === "home" ? homePlayers : awayPlayers;
+    const max = requiredStarters(players);
     const next = new Set(set);
     if (next.has(playerId)) {
       next.delete(playerId);
     } else {
-      if (next.size >= 5) return; // max 5 titulaires
+      if (next.size >= max) return;
       next.add(playerId);
     }
     setter(next);
@@ -131,10 +145,10 @@ export default function DemarrerMatchForm() {
     !isHomeNew && !isAwayNew && homeTeamId !== "" && homeTeamId === awayTeamId;
   const homeReady = isHomeNew
     ? homeTeamNewName.trim().length > 0
-    : homeTeamId !== "" && homeStarters.size === 5;
+    : homeTeamId !== "" && homeStarters.size === requiredStarters(homePlayers);
   const awayReady = isAwayNew
     ? awayTeamNewName.trim().length > 0
-    : awayTeamId !== "" && awayStarters.size === 5;
+    : awayTeamId !== "" && awayStarters.size === requiredStarters(awayPlayers);
   const readyToStart = homeReady && awayReady && !sameTeamConflict;
 
   // Crée une équipe à la volée (nom tapé à la main, ex. "Team A" pour un
@@ -176,12 +190,22 @@ export default function DemarrerMatchForm() {
       setError("Les deux équipes doivent être différentes.");
       return;
     }
-    if (!isHomeNew && homeStarters.size !== 5) {
-      setError("Choisis exactement 5 titulaires pour l'équipe à domicile.");
+    const homeRequired = requiredStarters(homePlayers);
+    const awayRequired = requiredStarters(awayPlayers);
+    if (!isHomeNew && homeStarters.size !== homeRequired) {
+      setError(
+        homeRequired === 0
+          ? "Erreur inattendue avec l'équipe à domicile."
+          : `Choisis ${homeRequired} titulaire${homeRequired > 1 ? "s" : ""} pour l'équipe à domicile.`
+      );
       return;
     }
-    if (!isAwayNew && awayStarters.size !== 5) {
-      setError("Choisis exactement 5 titulaires pour l'équipe visiteuse.");
+    if (!isAwayNew && awayStarters.size !== awayRequired) {
+      setError(
+        awayRequired === 0
+          ? "Erreur inattendue avec l'équipe visiteuse."
+          : `Choisis ${awayRequired} titulaire${awayRequired > 1 ? "s" : ""} pour l'équipe visiteuse.`
+      );
       return;
     }
 
@@ -252,10 +276,12 @@ export default function DemarrerMatchForm() {
     players: Player[],
     starters: Set<string>
   ) {
+    const required = requiredStarters(players);
     return (
       <div>
         <p className="text-xs text-white/40 uppercase tracking-wide mb-2">
-          {starters.size}/5 titulaires sélectionnés
+          {starters.size}/{required} titulaire{required > 1 ? "s" : ""} sélectionné
+          {required > 1 ? "s" : ""}
         </p>
         <div className="space-y-1 max-h-72 overflow-y-auto pr-1">
           {players.map((p) => {
