@@ -139,6 +139,11 @@ export default function DemarrerMatchForm() {
 
   // Crée une équipe à la volée (nom tapé à la main, ex. "Team A" pour un
   // essai) -- sans joueurs, donc pas de titulaires à choisir pour ce côté.
+  // Réutilise une équipe existante si le nom tapé correspond déjà à une
+  // équipe de la ligue (insensible à la casse/aux espaces) -- sinon chaque
+  // nouvel essai avec le même nom ("Team A" puis "team a") créait un
+  // doublon dans la liste des équipes (retour Digue 2026-08-31 : "bug dans
+  // la liste des equipes").
   async function resolveTeam(
     teamId: string,
     newName: string
@@ -147,10 +152,17 @@ export default function DemarrerMatchForm() {
       const team = teams.find((t) => t.id === teamId);
       return team ? { id: team.id, league_id: team.league_id } : null;
     }
-    if (!newName.trim()) return null;
+    const name = newName.trim();
+    if (!name) return null;
+
+    const existing = teams.find(
+      (t) => t.league_id === leagueId && t.name.toLowerCase() === name.toLowerCase()
+    );
+    if (existing) return { id: existing.id, league_id: existing.league_id };
+
     const { data, error } = await supabase
       .from("teams")
-      .insert({ name: newName.trim(), league_id: leagueId })
+      .insert({ name, league_id: leagueId })
       .select("id, league_id")
       .single();
     if (error || !data) return null;

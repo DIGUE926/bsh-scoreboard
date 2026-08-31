@@ -69,7 +69,12 @@ export default function NouveauMatchPage() {
   // Crée une équipe à la volée (nom tapé à la main, ex. "Team A" pour un
   // essai) -- pratique pour tester l'app sans dépendre des vraies équipes.
   // Sans joueurs : utilisable pour programmer un match, mais /demarrer
-  // ne pourra pas demander de titulaires pour ce côté.
+  // ne pourra pas demander de titulaires pour ce côté. Réutilise une équipe
+  // existante si le nom tapé correspond déjà à une équipe de la ligue
+  // (comparaison insensible à la casse/aux espaces) -- sinon chaque nouvel
+  // essai avec le même nom ("Team A" puis "team a") créait un doublon dans
+  // la liste des équipes (retour Digue 2026-08-31 : "bug dans la liste des
+  // equipes").
   async function resolveTeamId(
     selected: string,
     newName: string
@@ -78,10 +83,17 @@ export default function NouveauMatchPage() {
       const team = teams.find((t) => t.id === selected);
       return team ? { id: team.id, league_id: team.league_id } : null;
     }
-    if (!newName.trim()) return null;
+    const name = newName.trim();
+    if (!name) return null;
+
+    const existing = teams.find(
+      (t) => t.league_id === leagueId && t.name.toLowerCase() === name.toLowerCase()
+    );
+    if (existing) return { id: existing.id, league_id: existing.league_id };
+
     const { data, error } = await supabase
       .from("teams")
-      .insert({ name: newName.trim(), league_id: leagueId })
+      .insert({ name, league_id: leagueId })
       .select("id, league_id")
       .single();
     if (error || !data) return null;
