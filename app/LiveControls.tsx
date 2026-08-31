@@ -53,6 +53,53 @@ function pointsFor(eventType: EventType, made: boolean): number {
   return 0;
 }
 
+// Panneau d'ajout rapide de joueur -- purement présentationnel (le
+// composant qui l'utilise décide de la cible et de ce qui se passe une fois
+// le joueur créé/sélectionné). Défini au niveau module, pas dans le corps de
+// LiveControls, pour éviter de recréer un composant à chaque rendu.
+function QuickAddPanel({
+  name,
+  onNameChange,
+  onPick,
+  onSubmit,
+  error,
+}: {
+  name: string;
+  onNameChange: (v: string) => void;
+  onPick: (letter: string) => void;
+  onSubmit: () => void;
+  error: string | null;
+}) {
+  return (
+    <div className="mb-4 flex flex-wrap items-center gap-2 p-3 border border-bsh-orange/30 rounded-lg bg-white/5">
+      <span className="text-xs text-white/50 mr-1">Rapide :</span>
+      {["A", "B", "C", "D", "E"].map((letter) => (
+        <button
+          key={letter}
+          onClick={() => onPick(letter)}
+          className="w-8 h-8 rounded bg-white/10 text-sm font-bold hover:bg-bsh-orange hover:text-black transition-colors"
+        >
+          {letter}
+        </button>
+      ))}
+      <span className="text-xs text-white/50 mx-1">ou</span>
+      <input
+        value={name}
+        onChange={(e) => onNameChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") onSubmit();
+        }}
+        placeholder="Nom du joueur"
+        className="bg-white/5 border border-white/10 rounded px-3 py-1.5 text-sm focus:border-bsh-orange outline-none"
+      />
+      <button onClick={onSubmit} className="text-sm bg-bsh-orange text-black font-bold rounded px-3 py-1.5">
+        Ajouter
+      </button>
+      {error && <span className="text-xs text-red-400">{error}</span>}
+    </div>
+  );
+}
+
 export default function LiveControls({
   gameType,
   gameId,
@@ -115,6 +162,17 @@ export default function LiveControls({
   const [selectedPlayerId, setSelectedPlayerId] = useState<string>("");
   const [pendingShot, setPendingShot] = useState<{ x: number; y: number } | null>(null);
 
+  // Étapes du "slide" d'attribution d'un tir (retour Digue 2026-08-31) :
+  // clic sur le terrain → réussi/raté vite fait → quelle équipe → qui a
+  // shooté (titulaires) → qui a fait la passe (titulaires moins le
+  // shooteur, uniquement si le tir est réussi). null = pas de tir en cours,
+  // les contrôles habituels (LF/rebond/passe manuels) restent visibles.
+  type ShotStage = "made_miss" | "team" | "shooter" | "assist" | null;
+  const [shotStage, setShotStage] = useState<ShotStage>(null);
+  const [shotMade, setShotMade] = useState<boolean | null>(null);
+  const [shotTeamId, setShotTeamId] = useState<string>("");
+  const [shotShooterId, setShotShooterId] = useState<string>("");
+
   // Roster tenu en état local (pas juste les props) -- permet d'ajouter des
   // joueurs à la volée en cours de match (équipe test sans roster, ou joueur
   // manquant), sans recharger la page.
@@ -126,39 +184,41 @@ export default function LiveControls({
 
   const players = selectedTeamId === homeTeam.id ? homeRoster : awayRoster;
   const allPlayers = [...homeRoster, ...awayRoster];
+  const rosterFor = (teamId: string) => (teamId === homeTeam.id ? homeRoster : awayRoster);
 
-  // Crée (ou réutilise si le nom existe déjà côté équipe sélectionnée) un
-  // joueur à la volée -- pratique pour une équipe test sans roster ("A",
-  // "B", "C"...) ou pour ajouter rapidement un remplaçant non listé.
-  async function addPlayer(rawName: string) {
+  // Crée (ou réutilise si le nom existe déjà côté équipe cible) un joueur à
+  // la volée -- pratique pour une équipe test sans roster ("A", "B", "C"...)
+  // ou pour ajouter rapidement un remplaçant non listé. Retourne le joueur
+  // (créé ou existant) pour que l'appelant décide de la suite -- utilisé à
+  // la fois par la sélection manuelle et par le slide d'attribution de tir.
+  async function addPlayer(rawName: string, teamId: string): Promise<Player | null> {
     const name = rawName.trim();
-    if (!name) return;
+    if (!name) return null;
     setAddPlayerError(null);
 
-    const existing = players.find((p) => p.name.toLowerCase() === name.toLowerCase());
+    const existing = rosterFor(teamId).find((p) => p.name.toLowerCase() === name.toLowerCase());
     if (existing) {
-      setSelectedPlayerId(existing.id);
       setAddingPlayer(false);
       setNewPlayerName("");
-      return;
+      return existing;
     }
 
     const { data, error } = await supabase
       .from("players")
-      .insert({ team_id: selectedTeamId, name })
+      .insert({ team_id: teamId, name })
       .select("id, name, jersey_number")
       .single();
 
     if (error || !data) {
       setAddPlayerError("Erreur lors de l'ajout du joueur.");
-      return;
+      return null;
     }
 
-    if (selectedTeamId === homeTeam.id) setHomeRoster((prev) => [...prev, data]);
+    if (teamId === homeTeam.id) setHomeRoster((prev) => [...prev, data]);
     else setAwayRoster((prev) => [...prev, data]);
-    setSelectedPlayerId(data.id);
     setAddingPlayer(false);
     setNewPlayerName("");
+    return data;
   }
 
   async function persistScore(newHome: number, newAway: number) {
@@ -232,8 +292,14 @@ export default function LiveControls({
     }
   }
 
-  async function recordEvent(eventType: EventType, made: boolean, x?: number, y?: number) {
-    if (!selectedPlayerId) return;
+  async function insertGameEvent(
+    playerId: string,
+    teamId: string,
+    eventType: EventType,
+    made: boolean,
+    x?: number,
+    y?: number
+  ) {
     const points = pointsFor(eventType, made);
 
     const { data, error } = await supabase
@@ -241,8 +307,8 @@ export default function LiveControls({
       .insert({
         game_id: gameId,
         game_type: gameType,
-        player_id: selectedPlayerId,
-        team_id: selectedTeamId,
+        player_id: playerId,
+        team_id: teamId,
         period,
         x: x ?? null,
         y: y ?? null,
@@ -255,15 +321,62 @@ export default function LiveControls({
 
     if (!error && data) {
       setEvents((prev) => [...prev, data as GameEvent]);
-      await applyDelta(selectedPlayerId, deltaFor(eventType, made));
-      if (points > 0) bumpScore(selectedTeamId, points);
+      await applyDelta(playerId, deltaFor(eventType, made));
+      if (points > 0) bumpScore(teamId, points);
     }
-    setPendingShot(null);
   }
 
-  function handleCourtClick(x: number, y: number) {
+  async function recordEvent(eventType: EventType, made: boolean) {
     if (!selectedPlayerId) return;
+    await insertGameEvent(selectedPlayerId, selectedTeamId, eventType, made);
+  }
+
+  // Slide d'attribution d'un tir : clic terrain → réussi/raté → équipe →
+  // shooteur → (si réussi) passeur. Le terrain reste cliquable en
+  // permanence -- plus besoin de choisir un joueur avant de taper le tir.
+  function handleCourtClick(x: number, y: number) {
+    if (shotStage) return; // un tir est déjà en cours d'attribution
+    setAddingPlayer(false);
     setPendingShot({ x, y });
+    setShotStage("made_miss");
+  }
+
+  function chooseMadeMiss(made: boolean) {
+    setShotMade(made);
+    setShotStage("team");
+  }
+
+  function chooseShotTeam(teamId: string) {
+    setShotTeamId(teamId);
+    setShotStage("shooter");
+  }
+
+  function chooseShooter(playerId: string) {
+    setShotShooterId(playerId);
+    if (shotMade) {
+      setShotStage("assist");
+    } else {
+      finalizeShot(playerId);
+    }
+  }
+
+  function cancelShotWizard() {
+    setPendingShot(null);
+    setShotStage(null);
+    setShotMade(null);
+    setShotTeamId("");
+    setShotShooterId("");
+    setAddingPlayer(false);
+  }
+
+  async function finalizeShot(shooterId: string, assistId?: string) {
+    if (!pendingShot || shotMade === null || !shotTeamId) return;
+    const eventType = guessShotType(pendingShot.x, pendingShot.y);
+    await insertGameEvent(shooterId, shotTeamId, eventType, shotMade, pendingShot.x, pendingShot.y);
+    if (shotMade && assistId) {
+      await insertGameEvent(assistId, shotTeamId, "AST", true);
+    }
+    cancelShotWizard();
   }
 
   async function undoLastEvent() {
@@ -333,118 +446,199 @@ export default function LiveControls({
         ))}
       </div>
 
-      {/* Player selection */}
-      <div className="mb-2 flex flex-wrap items-center gap-3">
-        <div className="flex rounded-lg overflow-hidden border border-white/10">
-          {[homeTeam, awayTeam].map((t) => (
+      {/* En dehors d'un tir en cours d'attribution : contrôles habituels
+          (équipe/joueur actif + LF/rebond/passe manuels). Pendant un tir
+          (shotStage non-null), ce bloc laisse la place au slide juste en
+          dessous -- retour Digue 2026-08-31 ("ca doit etre comme un
+          slide") : le terrain se tape en premier, on attribue ensuite. */}
+      {!shotStage && (
+        <>
+          <div className="mb-2 flex flex-wrap items-center gap-3">
+            <div className="flex rounded-lg overflow-hidden border border-white/10">
+              {[homeTeam, awayTeam].map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => {
+                    setSelectedTeamId(t.id);
+                    setSelectedPlayerId("");
+                  }}
+                  className={`px-3 py-1.5 text-sm ${
+                    selectedTeamId === t.id ? "bg-bsh-orange text-black font-bold" : "bg-white/5 text-white/70"
+                  }`}
+                >
+                  {t.name}
+                </button>
+              ))}
+            </div>
+
+            {events.length > 0 && (
+              <button onClick={undoLastEvent} className="text-sm text-white/50 hover:text-white ml-auto">
+                ↩ Annuler dernière action
+              </button>
+            )}
+          </div>
+
+          {/* Joueurs en gros boutons tactiles -- un tap suffit, pas de menu
+              déroulant à ouvrir/scroller en plein match (retour Digue
+              2026-08-31 : "trop long pour choisir les joueurs"). Sert aux
+              actions manuelles (LF/rebond/passe) ci-dessous -- les tirs
+              passent maintenant par le slide déclenché au clic sur le
+              terrain. */}
+          <div className="mb-4 flex flex-wrap gap-1.5">
+            {players.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => setSelectedPlayerId(p.id)}
+                className={`px-3 py-2 rounded-lg text-sm font-semibold transition-colors ${
+                  selectedPlayerId === p.id
+                    ? "bg-bsh-orange text-black"
+                    : "bg-white/10 text-white/80 hover:bg-white/20"
+                }`}
+              >
+                #{p.jersey_number ?? "-"} {p.name}
+              </button>
+            ))}
             <button
-              key={t.id}
-              onClick={() => {
-                setSelectedTeamId(t.id);
-                setSelectedPlayerId("");
+              onClick={() => setAddingPlayer((v) => !v)}
+              className="px-3 py-2 rounded-lg text-sm font-semibold bg-white/5 text-white/50 border border-dashed border-white/20 hover:bg-white/10"
+            >
+              + Joueur
+            </button>
+          </div>
+
+          {addingPlayer && (
+            <QuickAddPanel
+              name={newPlayerName}
+              onNameChange={setNewPlayerName}
+              onPick={(letter) => {
+                addPlayer(letter, selectedTeamId).then((p) => p && setSelectedPlayerId(p.id));
               }}
-              className={`px-3 py-1.5 text-sm ${
-                selectedTeamId === t.id ? "bg-bsh-orange text-black font-bold" : "bg-white/5 text-white/70"
-              }`}
-            >
-              {t.name}
-            </button>
-          ))}
+              onSubmit={() => {
+                addPlayer(newPlayerName, selectedTeamId).then((p) => p && setSelectedPlayerId(p.id));
+              }}
+              error={addPlayerError}
+            />
+          )}
+
+          {selectedPlayerId && (
+            <div className="flex flex-wrap gap-2 mb-4">
+              <button onClick={() => recordEvent("FT", true)} className="text-sm bg-green-600/20 text-green-400 rounded px-3 py-1.5">
+                LF réussi
+              </button>
+              <button onClick={() => recordEvent("FT", false)} className="text-sm bg-red-600/20 text-red-400 rounded px-3 py-1.5">
+                LF raté
+              </button>
+              <button onClick={() => recordEvent("REB", true)} className="text-sm bg-white/10 text-white/80 rounded px-3 py-1.5">
+                Rebond
+              </button>
+              <button onClick={() => recordEvent("AST", true)} className="text-sm bg-white/10 text-white/80 rounded px-3 py-1.5">
+                Passe déc.
+              </button>
+            </div>
+          )}
+
+          {!selectedPlayerId && (
+            <p className="text-xs text-white/40 mb-2">
+              Tape le terrain pour un tir, ou choisis un joueur pour un LF/rebond/passe.
+            </p>
+          )}
+        </>
+      )}
+
+      {/* Slide d'attribution -- étapes 2 à 4 (équipe / shooteur / passeur),
+          l'étape 1 (réussi/raté) est la bulle flottante sur le terrain
+          juste en dessous. */}
+      {shotStage === "team" && (
+        <div className="mb-4 p-3 border border-bsh-orange/30 rounded-lg bg-white/5">
+          <p className="text-sm text-white/70 mb-2">
+            Tir {shotMade ? "réussi" : "raté"} -- quelle équipe ?
+          </p>
+          <div className="flex gap-2">
+            {[homeTeam, awayTeam].map((t) => (
+              <button
+                key={t.id}
+                onClick={() => chooseShotTeam(t.id)}
+                className="flex-1 bg-white/10 hover:bg-bsh-orange hover:text-black rounded-lg py-3 font-bold text-sm transition-colors"
+              >
+                {t.name}
+              </button>
+            ))}
+          </div>
+          <button onClick={cancelShotWizard} className="text-xs text-white/40 mt-2">
+            annuler
+          </button>
         </div>
+      )}
 
-        {events.length > 0 && (
-          <button onClick={undoLastEvent} className="text-sm text-white/50 hover:text-white ml-auto">
-            ↩ Annuler dernière action
-          </button>
-        )}
-      </div>
-
-      {/* Joueurs en gros boutons tactiles -- un tap suffit, pas de menu
-          déroulant à ouvrir/scroller en plein match (retour Digue
-          2026-08-31 : "trop long pour choisir les joueurs"). */}
-      <div className="mb-4 flex flex-wrap gap-1.5">
-        {players.map((p) => (
-          <button
-            key={p.id}
-            onClick={() => setSelectedPlayerId(p.id)}
-            className={`px-3 py-2 rounded-lg text-sm font-semibold transition-colors ${
-              selectedPlayerId === p.id
-                ? "bg-bsh-orange text-black"
-                : "bg-white/10 text-white/80 hover:bg-white/20"
-            }`}
-          >
-            #{p.jersey_number ?? "-"} {p.name}
-          </button>
-        ))}
-        <button
-          onClick={() => setAddingPlayer((v) => !v)}
-          className="px-3 py-2 rounded-lg text-sm font-semibold bg-white/5 text-white/50 border border-dashed border-white/20 hover:bg-white/10"
-        >
-          + Joueur
-        </button>
-      </div>
-
-      {/* Ajout rapide de joueur -- lettres A/B/C toutes prêtes (équipe test
-          sans roster) ou nom libre au clavier. */}
-      {addingPlayer && (
-        <div className="mb-4 flex flex-wrap items-center gap-2 p-3 border border-bsh-orange/30 rounded-lg bg-white/5">
-          <span className="text-xs text-white/50 mr-1">Rapide :</span>
-          {["A", "B", "C", "D", "E"].map((letter) => (
+      {shotStage === "shooter" && (
+        <div className="mb-4 p-3 border border-bsh-orange/30 rounded-lg bg-white/5">
+          <p className="text-sm text-white/70 mb-2">Qui a {shotMade ? "marqué" : "tenté"} le tir ?</p>
+          <div className="flex flex-wrap gap-1.5">
+            {rosterFor(shotTeamId).map((p) => (
+              <button
+                key={p.id}
+                onClick={() => chooseShooter(p.id)}
+                className="px-3 py-2 rounded-lg text-sm font-semibold bg-white/10 text-white/80 hover:bg-bsh-orange hover:text-black transition-colors"
+              >
+                #{p.jersey_number ?? "-"} {p.name}
+              </button>
+            ))}
             <button
-              key={letter}
-              onClick={() => addPlayer(letter)}
-              className="w-8 h-8 rounded bg-white/10 text-sm font-bold hover:bg-bsh-orange hover:text-black transition-colors"
+              onClick={() => setAddingPlayer((v) => !v)}
+              className="px-3 py-2 rounded-lg text-sm font-semibold bg-white/5 text-white/50 border border-dashed border-white/20 hover:bg-white/10"
             >
-              {letter}
+              + Joueur
             </button>
-          ))}
-          <span className="text-xs text-white/50 mx-1">ou</span>
-          <input
-            value={newPlayerName}
-            onChange={(e) => setNewPlayerName(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") addPlayer(newPlayerName);
-            }}
-            placeholder="Nom du joueur"
-            className="bg-white/5 border border-white/10 rounded px-3 py-1.5 text-sm focus:border-bsh-orange outline-none"
-          />
-          <button
-            onClick={() => addPlayer(newPlayerName)}
-            className="text-sm bg-bsh-orange text-black font-bold rounded px-3 py-1.5"
-          >
-            Ajouter
-          </button>
-          {addPlayerError && <span className="text-xs text-red-400">{addPlayerError}</span>}
-        </div>
-      )}
-
-      {/* Quick action buttons */}
-      {selectedPlayerId && (
-        <div className="flex flex-wrap gap-2 mb-4">
-          <button onClick={() => recordEvent("FT", true)} className="text-sm bg-green-600/20 text-green-400 rounded px-3 py-1.5">
-            LF réussi
-          </button>
-          <button onClick={() => recordEvent("FT", false)} className="text-sm bg-red-600/20 text-red-400 rounded px-3 py-1.5">
-            LF raté
-          </button>
-          <button onClick={() => recordEvent("REB", true)} className="text-sm bg-white/10 text-white/80 rounded px-3 py-1.5">
-            Rebond
-          </button>
-          <button onClick={() => recordEvent("AST", true)} className="text-sm bg-white/10 text-white/80 rounded px-3 py-1.5">
-            Passe déc.
+          </div>
+          {addingPlayer && (
+            <QuickAddPanel
+              name={newPlayerName}
+              onNameChange={setNewPlayerName}
+              onPick={(letter) => {
+                addPlayer(letter, shotTeamId).then((p) => p && chooseShooter(p.id));
+              }}
+              onSubmit={() => {
+                addPlayer(newPlayerName, shotTeamId).then((p) => p && chooseShooter(p.id));
+              }}
+              error={addPlayerError}
+            />
+          )}
+          <button onClick={cancelShotWizard} className="text-xs text-white/40 mt-2">
+            annuler
           </button>
         </div>
       )}
 
-      {!selectedPlayerId && (
-        <p className="text-xs text-white/40 mb-2">Choisis un joueur, puis tape une action ou une zone du terrain.</p>
+      {shotStage === "assist" && (
+        <div className="mb-4 p-3 border border-bsh-orange/30 rounded-lg bg-white/5">
+          <p className="text-sm text-white/70 mb-2">Qui a fait la passe ?</p>
+          <div className="flex flex-wrap gap-1.5">
+            {rosterFor(shotTeamId)
+              .filter((p) => p.id !== shotShooterId)
+              .map((p) => (
+                <button
+                  key={p.id}
+                  onClick={() => finalizeShot(shotShooterId, p.id)}
+                  className="px-3 py-2 rounded-lg text-sm font-semibold bg-white/10 text-white/80 hover:bg-bsh-orange hover:text-black transition-colors"
+                >
+                  #{p.jersey_number ?? "-"} {p.name}
+                </button>
+              ))}
+            <button
+              onClick={() => finalizeShot(shotShooterId)}
+              className="px-3 py-2 rounded-lg text-sm font-semibold bg-white/5 text-white/50 border border-dashed border-white/20 hover:bg-white/10"
+            >
+              Pas de passe
+            </button>
+          </div>
+        </div>
       )}
 
       {/* Court diagram */}
       <div className="max-w-md relative mb-8">
-        <CourtDiagram shots={courtShots} onCourtClick={selectedPlayerId ? handleCourtClick : undefined} />
+        <CourtDiagram shots={courtShots} onCourtClick={handleCourtClick} />
 
-        {pendingShot && (
+        {shotStage === "made_miss" && pendingShot && (
           <div
             className="absolute bg-bsh-black border border-bsh-orange rounded-lg p-2 flex flex-col gap-1 shadow-xl z-10"
             style={{
@@ -456,19 +650,19 @@ export default function LiveControls({
             <p className="text-xs text-bsh-gold font-bold text-center mb-1">{guess}</p>
             <div className="flex gap-1">
               <button
-                onClick={() => recordEvent(guess, true, pendingShot.x, pendingShot.y)}
+                onClick={() => chooseMadeMiss(true)}
                 className="text-xs px-3 py-1.5 rounded bg-green-600 text-white font-bold"
               >
                 Réussi ✓
               </button>
               <button
-                onClick={() => recordEvent(guess, false, pendingShot.x, pendingShot.y)}
+                onClick={() => chooseMadeMiss(false)}
                 className="text-xs px-3 py-1.5 rounded bg-red-600/80 text-white font-bold"
               >
                 Raté ✗
               </button>
             </div>
-            <button onClick={() => setPendingShot(null)} className="text-xs text-white/40">
+            <button onClick={cancelShotWizard} className="text-xs text-white/40">
               annuler
             </button>
           </div>
