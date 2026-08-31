@@ -334,7 +334,7 @@ export default function LiveControls({
       </div>
 
       {/* Player selection */}
-      <div className="mb-4 flex flex-wrap items-center gap-3">
+      <div className="mb-2 flex flex-wrap items-center gap-3">
         <div className="flex rounded-lg overflow-hidden border border-white/10">
           {[homeTeam, awayTeam].map((t) => (
             <button
@@ -352,31 +352,36 @@ export default function LiveControls({
           ))}
         </div>
 
-        <select
-          value={selectedPlayerId}
-          onChange={(e) => setSelectedPlayerId(e.target.value)}
-          className="bg-white/5 border border-white/10 rounded px-3 py-1.5 text-sm focus:border-bsh-orange outline-none"
-        >
-          <option value="">— Choisir un joueur —</option>
-          {players.map((p) => (
-            <option key={p.id} value={p.id}>
-              #{p.jersey_number ?? "-"} {p.name}
-            </option>
-          ))}
-        </select>
-
-        <button
-          onClick={() => setAddingPlayer((v) => !v)}
-          className="text-sm bg-white/10 text-white/70 rounded px-3 py-1.5 hover:bg-white/20"
-        >
-          + Joueur
-        </button>
-
         {events.length > 0 && (
           <button onClick={undoLastEvent} className="text-sm text-white/50 hover:text-white ml-auto">
             ↩ Annuler dernière action
           </button>
         )}
+      </div>
+
+      {/* Joueurs en gros boutons tactiles -- un tap suffit, pas de menu
+          déroulant à ouvrir/scroller en plein match (retour Digue
+          2026-08-31 : "trop long pour choisir les joueurs"). */}
+      <div className="mb-4 flex flex-wrap gap-1.5">
+        {players.map((p) => (
+          <button
+            key={p.id}
+            onClick={() => setSelectedPlayerId(p.id)}
+            className={`px-3 py-2 rounded-lg text-sm font-semibold transition-colors ${
+              selectedPlayerId === p.id
+                ? "bg-bsh-orange text-black"
+                : "bg-white/10 text-white/80 hover:bg-white/20"
+            }`}
+          >
+            #{p.jersey_number ?? "-"} {p.name}
+          </button>
+        ))}
+        <button
+          onClick={() => setAddingPlayer((v) => !v)}
+          className="px-3 py-2 rounded-lg text-sm font-semibold bg-white/5 text-white/50 border border-dashed border-white/20 hover:bg-white/10"
+        >
+          + Joueur
+        </button>
       </div>
 
       {/* Ajout rapide de joueur -- lettres A/B/C toutes prêtes (équipe test
