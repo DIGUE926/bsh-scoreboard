@@ -115,8 +115,51 @@ export default function LiveControls({
   const [selectedPlayerId, setSelectedPlayerId] = useState<string>("");
   const [pendingShot, setPendingShot] = useState<{ x: number; y: number } | null>(null);
 
-  const players = selectedTeamId === homeTeam.id ? homePlayers : awayPlayers;
-  const allPlayers = [...homePlayers, ...awayPlayers];
+  // Roster tenu en état local (pas juste les props) -- permet d'ajouter des
+  // joueurs à la volée en cours de match (équipe test sans roster, ou joueur
+  // manquant), sans recharger la page.
+  const [homeRoster, setHomeRoster] = useState<Player[]>(homePlayers);
+  const [awayRoster, setAwayRoster] = useState<Player[]>(awayPlayers);
+  const [addingPlayer, setAddingPlayer] = useState(false);
+  const [newPlayerName, setNewPlayerName] = useState("");
+  const [addPlayerError, setAddPlayerError] = useState<string | null>(null);
+
+  const players = selectedTeamId === homeTeam.id ? homeRoster : awayRoster;
+  const allPlayers = [...homeRoster, ...awayRoster];
+
+  // Crée (ou réutilise si le nom existe déjà côté équipe sélectionnée) un
+  // joueur à la volée -- pratique pour une équipe test sans roster ("A",
+  // "B", "C"...) ou pour ajouter rapidement un remplaçant non listé.
+  async function addPlayer(rawName: string) {
+    const name = rawName.trim();
+    if (!name) return;
+    setAddPlayerError(null);
+
+    const existing = players.find((p) => p.name.toLowerCase() === name.toLowerCase());
+    if (existing) {
+      setSelectedPlayerId(existing.id);
+      setAddingPlayer(false);
+      setNewPlayerName("");
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("players")
+      .insert({ team_id: selectedTeamId, name })
+      .select("id, name, jersey_number")
+      .single();
+
+    if (error || !data) {
+      setAddPlayerError("Erreur lors de l'ajout du joueur.");
+      return;
+    }
+
+    if (selectedTeamId === homeTeam.id) setHomeRoster((prev) => [...prev, data]);
+    else setAwayRoster((prev) => [...prev, data]);
+    setSelectedPlayerId(data.id);
+    setAddingPlayer(false);
+    setNewPlayerName("");
+  }
 
   async function persistScore(newHome: number, newAway: number) {
     setHomeScore(newHome);
@@ -322,12 +365,53 @@ export default function LiveControls({
           ))}
         </select>
 
+        <button
+          onClick={() => setAddingPlayer((v) => !v)}
+          className="text-sm bg-white/10 text-white/70 rounded px-3 py-1.5 hover:bg-white/20"
+        >
+          + Joueur
+        </button>
+
         {events.length > 0 && (
           <button onClick={undoLastEvent} className="text-sm text-white/50 hover:text-white ml-auto">
             ↩ Annuler dernière action
           </button>
         )}
       </div>
+
+      {/* Ajout rapide de joueur -- lettres A/B/C toutes prêtes (équipe test
+          sans roster) ou nom libre au clavier. */}
+      {addingPlayer && (
+        <div className="mb-4 flex flex-wrap items-center gap-2 p-3 border border-bsh-orange/30 rounded-lg bg-white/5">
+          <span className="text-xs text-white/50 mr-1">Rapide :</span>
+          {["A", "B", "C", "D", "E"].map((letter) => (
+            <button
+              key={letter}
+              onClick={() => addPlayer(letter)}
+              className="w-8 h-8 rounded bg-white/10 text-sm font-bold hover:bg-bsh-orange hover:text-black transition-colors"
+            >
+              {letter}
+            </button>
+          ))}
+          <span className="text-xs text-white/50 mx-1">ou</span>
+          <input
+            value={newPlayerName}
+            onChange={(e) => setNewPlayerName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") addPlayer(newPlayerName);
+            }}
+            placeholder="Nom du joueur"
+            className="bg-white/5 border border-white/10 rounded px-3 py-1.5 text-sm focus:border-bsh-orange outline-none"
+          />
+          <button
+            onClick={() => addPlayer(newPlayerName)}
+            className="text-sm bg-bsh-orange text-black font-bold rounded px-3 py-1.5"
+          >
+            Ajouter
+          </button>
+          {addPlayerError && <span className="text-xs text-red-400">{addPlayerError}</span>}
+        </div>
+      )}
 
       {/* Quick action buttons */}
       {selectedPlayerId && (
