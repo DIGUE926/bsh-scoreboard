@@ -4,7 +4,11 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import U20Badge from "@/app/U20Badge";
-import { isScoreboardAhbbEnabled } from "@/lib/settings";
+import {
+  isScoreboardAhbbEnabled,
+  leagueDisplayLabel,
+  REPETITION_LEAGUE_SLUG,
+} from "@/lib/settings";
 
 type Team = { id: string; name: string; league_id: string };
 type League = { id: string; name: string; slug: string };
@@ -35,11 +39,17 @@ export default function NouveauMatchPage() {
     async function loadLeagues() {
       const ahbbEnabled = await isScoreboardAhbbEnabled();
       let query = supabase.from("leagues").select("id, name, slug").order("name");
-      if (!ahbbEnabled) query = query.eq("slug", "suble");
+      if (!ahbbEnabled) query = query.in("slug", ["suble", REPETITION_LEAGUE_SLUG]);
       const { data } = await query;
       if (data) {
-        setLeagues(data);
-        if (data.length > 0) setLeagueId(data[0].id);
+        // Répétition toujours en dernier, quel que soit l'ordre alphabétique.
+        const sorted = [...data].sort(
+          (a, b) =>
+            Number(a.slug === REPETITION_LEAGUE_SLUG) -
+            Number(b.slug === REPETITION_LEAGUE_SLUG)
+        );
+        setLeagues(sorted);
+        if (sorted.length > 0) setLeagueId(sorted[0].id);
       }
     }
     loadLeagues();
@@ -160,7 +170,7 @@ export default function NouveauMatchPage() {
                     : "bg-white/5 text-white/60 hover:text-bsh-orange"
                 }`}
               >
-                {l.slug.toUpperCase()}
+                {leagueDisplayLabel(l.slug)}
                 <U20Badge slug={l.slug} />
               </button>
             ))}

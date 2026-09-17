@@ -4,6 +4,19 @@ const LIVE_SCORING_KEY = "live_scoring_enabled";
 const SCOREBOARD_AHBB_KEY = "scoreboard_ahbb_enabled";
 
 /**
+ * Ligue de test (is_hidden = true en base, jamais affichée sur le site
+ * public bsh-web). Toujours proposée en dernier dans les sélecteurs de
+ * ligue du scoreboard, sous un libellé explicite pour ne pas la confondre
+ * avec une vraie ligue.
+ */
+export const REPETITION_LEAGUE_SLUG = "repetition";
+const REPETITION_LEAGUE_LABEL = "Répétition (test)";
+
+export function leagueDisplayLabel(slug: string): string {
+  return slug === REPETITION_LEAGUE_SLUG ? REPETITION_LEAGUE_LABEL : slug.toUpperCase();
+}
+
+/**
  * Même kill switch que bsh-web (table app_settings partagée). Si la ligne
  * n'existe pas, on considère la feature activée par défaut.
  */
