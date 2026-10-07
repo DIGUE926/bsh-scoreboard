@@ -53,6 +53,34 @@ function pointsFor(eventType: EventType, made: boolean): number {
   return 0;
 }
 
+// Bouton de la feuille de stats : gros, tactile, un tap = une stat.
+function SheetButton({
+  children,
+  onClick,
+  tone,
+  small,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  tone?: "made" | "miss";
+  small?: boolean;
+}) {
+  const color =
+    tone === "made"
+      ? "bg-green-600/25 text-green-300 active:bg-green-600/60"
+      : tone === "miss"
+        ? "bg-red-600/15 text-red-300 active:bg-red-600/50"
+        : "bg-white/10 text-white/90 active:bg-white/30";
+  return (
+    <button
+      onClick={onClick}
+      className={`rounded-lg font-bold ${small ? "py-1.5 text-xs" : "py-3 text-sm"} ${color}`}
+    >
+      {children}
+    </button>
+  );
+}
+
 // Panneau d'ajout rapide de joueur -- purement présentationnel (le
 // composant qui l'utilise décide de la cible et de ce qui se passe une fois
 // le joueur créé/sélectionné). Défini au niveau module, pas dans le corps de
@@ -158,6 +186,11 @@ export default function LiveControls({
     return map;
   });
 
+  // Mode de saisie : "sheet" = feuille de stats (un tap par stat, aucune
+  // formation nécessaire), "court" = clic sur le terrain (position des tirs).
+  // Les deux écrivent les mêmes game_events -> les notifications du site
+  // (bsh-web /api/push/live) fonctionnent à l'identique.
+  const [mode, setMode] = useState<"sheet" | "court">("sheet");
   const [selectedTeamId, setSelectedTeamId] = useState<string>(homeTeam.id);
   const [selectedPlayerId, setSelectedPlayerId] = useState<string>("");
   const [pendingShot, setPendingShot] = useState<{ x: number; y: number } | null>(null);
@@ -395,6 +428,13 @@ export default function LiveControls({
     if (points > 0) bumpScore(last.team_id, -points);
   }
 
+  const lastEvent = events[events.length - 1];
+  const lastEventLabel = lastEvent
+    ? `${allPlayers.find((p) => p.id === lastEvent.player_id)?.name ?? "?"} ${
+        lastEvent.made ? "" : "✗ "
+      }${lastEvent.event_type === "FT" ? "LF" : lastEvent.event_type}`
+    : "";
+
   const guess = pendingShot ? guessShotType(pendingShot.x, pendingShot.y) : "2PT";
   const courtShots = events.filter((e) => e.event_type === "2PT" || e.event_type === "3PT");
 
@@ -451,6 +491,101 @@ export default function LiveControls({
           (shotStage non-null), ce bloc laisse la place au slide juste en
           dessous -- retour Digue 2026-08-31 ("ca doit etre comme un
           slide") : le terrain se tape en premier, on attribue ensuite. */}
+      {/* Bascule de mode + annulation (communes aux deux modes) */}
+      <div className="mb-3 flex flex-wrap items-center gap-3">
+        <div className="flex rounded-lg overflow-hidden border border-white/10">
+          {(["sheet", "court"] as const).map((m) => (
+            <button
+              key={m}
+              onClick={() => {
+                cancelShotWizard();
+                setMode(m);
+              }}
+              className={`px-3 py-1.5 text-sm ${
+                mode === m ? "bg-bsh-orange text-black font-bold" : "bg-white/5 text-white/70"
+              }`}
+            >
+              {m === "sheet" ? "Feuille de stats" : "Terrain"}
+            </button>
+          ))}
+        </div>
+        {events.length > 0 && (
+          <button onClick={undoLastEvent} className="text-sm text-white/60 hover:text-white ml-auto">
+            ↩ Annuler : {lastEventLabel}
+          </button>
+        )}
+      </div>
+
+      {mode === "sheet" && (
+        <div className="mb-8">
+          <div className="mb-3 flex rounded-lg overflow-hidden border border-white/10 w-fit">
+            {[homeTeam, awayTeam].map((t) => (
+              <button
+                key={t.id}
+                onClick={() => setSelectedTeamId(t.id)}
+                className={`px-4 py-2 text-sm ${
+                  selectedTeamId === t.id ? "bg-bsh-orange text-black font-bold" : "bg-white/5 text-white/70"
+                }`}
+              >
+                {t.name}
+              </button>
+            ))}
+          </div>
+
+          <div className="space-y-2">
+            {players.map((p) => {
+              const b = box[p.id];
+              return (
+                <div key={p.id} className="p-2 border border-white/10 rounded-lg bg-white/5">
+                  <div className="flex items-baseline justify-between mb-2">
+                    <span className="font-semibold text-sm">
+                      #{p.jersey_number ?? "-"} {p.name}
+                    </span>
+                    <span className="text-xs text-white/60 tabular-nums">
+                      <b className="text-bsh-orange text-base">{b?.pts ?? 0}</b> pts · {b?.reb ?? 0} reb ·{" "}
+                      {b?.ast ?? 0} ast
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-6 gap-1.5">
+                    <SheetButton tone="made" onClick={() => insertGameEvent(p.id, selectedTeamId, "FT", true)}>+1</SheetButton>
+                    <SheetButton tone="made" onClick={() => insertGameEvent(p.id, selectedTeamId, "2PT", true)}>+2</SheetButton>
+                    <SheetButton tone="made" onClick={() => insertGameEvent(p.id, selectedTeamId, "3PT", true)}>+3</SheetButton>
+                    <SheetButton onClick={() => insertGameEvent(p.id, selectedTeamId, "REB", true)}>REB</SheetButton>
+                    <SheetButton onClick={() => insertGameEvent(p.id, selectedTeamId, "AST", true)}>AST</SheetButton>
+                    <SheetButton tone="miss" onClick={() => insertGameEvent(p.id, selectedTeamId, "2PT", false)}>✗ tir</SheetButton>
+                  </div>
+                  <div className="grid grid-cols-6 gap-1.5 mt-1.5">
+                    <SheetButton tone="miss" small onClick={() => insertGameEvent(p.id, selectedTeamId, "FT", false)}>✗ LF</SheetButton>
+                    <SheetButton tone="miss" small onClick={() => insertGameEvent(p.id, selectedTeamId, "3PT", false)}>✗ 3pts</SheetButton>
+                  </div>
+                </div>
+              );
+            })}
+            <button
+              onClick={() => setAddingPlayer((v) => !v)}
+              className="px-3 py-2 rounded-lg text-sm font-semibold bg-white/5 text-white/50 border border-dashed border-white/20 hover:bg-white/10"
+            >
+              + Joueur
+            </button>
+            {addingPlayer && (
+              <QuickAddPanel
+                name={newPlayerName}
+                onNameChange={setNewPlayerName}
+                onPick={(letter) => {
+                  addPlayer(letter, selectedTeamId);
+                }}
+                onSubmit={() => {
+                  addPlayer(newPlayerName, selectedTeamId);
+                }}
+                error={addPlayerError}
+              />
+            )}
+          </div>
+        </div>
+      )}
+
+      {mode === "court" && (
+      <>
       {!shotStage && (
         <>
           <div className="mb-2 flex flex-wrap items-center gap-3">
@@ -471,11 +606,6 @@ export default function LiveControls({
               ))}
             </div>
 
-            {events.length > 0 && (
-              <button onClick={undoLastEvent} className="text-sm text-white/50 hover:text-white ml-auto">
-                ↩ Annuler dernière action
-              </button>
-            )}
           </div>
 
           {/* Joueurs en gros boutons tactiles -- un tap suffit, pas de menu
@@ -668,6 +798,8 @@ export default function LiveControls({
           </div>
         )}
       </div>
+      </>
+      )}
 
       {/* Box score live */}
       <div>
