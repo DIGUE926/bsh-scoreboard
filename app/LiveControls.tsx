@@ -203,6 +203,7 @@ export default function LiveControls({
   // Les deux écrivent les mêmes game_events -> les notifications du site
   // (bsh-web /api/push/live) fonctionnent à l'identique.
   const [mode, setMode] = useState<"sheet" | "court">("sheet");
+  const [courtOpen, setCourtOpen] = useState(false);
   const [selectedTeamId, setSelectedTeamId] = useState<string>(homeTeam.id);
   const [selectedPlayerId, setSelectedPlayerId] = useState<string>("");
   const [pendingShot, setPendingShot] = useState<{ x: number; y: number } | null>(null);
@@ -456,6 +457,139 @@ export default function LiveControls({
   const guess = pendingShot ? guessShotType(pendingShot.x, pendingShot.y) : "2PT";
   const courtShots = events.filter((e) => e.event_type === "2PT" || e.event_type === "3PT");
 
+  const wizardUi = (
+    <>
+      {/* Slide d'attribution -- étapes 2 à 4 (équipe / shooteur / passeur),
+          l'étape 1 (réussi/raté) est la bulle flottante sur le terrain
+          juste en dessous. */}
+      {shotStage === "team" && (
+        <div className="mb-4 p-3 border border-bsh-orange/30 rounded-lg bg-white/5">
+          <p className="text-sm text-white/70 mb-2">
+            Tir {shotMade ? "réussi" : "raté"} -- quelle équipe ?
+          </p>
+          <div className="flex gap-2">
+            {[homeTeam, awayTeam].map((t) => (
+              <button
+                key={t.id}
+                onClick={() => chooseShotTeam(t.id)}
+                className="flex-1 bg-white/10 hover:bg-bsh-orange hover:text-black rounded-lg py-3 font-bold text-sm transition-colors"
+              >
+                {t.name}
+              </button>
+            ))}
+          </div>
+          <button onClick={cancelShotWizard} className="text-xs text-white/40 mt-2">
+            annuler
+          </button>
+        </div>
+      )}
+
+      {shotStage === "shooter" && (
+        <div className="mb-4 p-3 border border-bsh-orange/30 rounded-lg bg-white/5">
+          <p className="text-sm text-white/70 mb-2">Qui a {shotMade ? "marqué" : "tenté"} le tir ?</p>
+          <div className="flex flex-wrap gap-1.5">
+            {rosterFor(shotTeamId).map((p) => (
+              <button
+                key={p.id}
+                onClick={() => chooseShooter(p.id)}
+                className="px-3 py-2 rounded-lg text-sm font-semibold bg-white/10 text-white/80 hover:bg-bsh-orange hover:text-black transition-colors"
+              >
+                #{p.jersey_number ?? "-"} {p.name}
+              </button>
+            ))}
+            <button
+              onClick={() => setAddingPlayer((v) => !v)}
+              className="px-3 py-2 rounded-lg text-sm font-semibold bg-white/5 text-white/50 border border-dashed border-white/20 hover:bg-white/10"
+            >
+              + Joueur
+            </button>
+          </div>
+          {addingPlayer && (
+            <QuickAddPanel
+              name={newPlayerName}
+              onNameChange={setNewPlayerName}
+              onPick={(letter) => {
+                addPlayer(letter, shotTeamId).then((p) => p && chooseShooter(p.id));
+              }}
+              onSubmit={() => {
+                addPlayer(newPlayerName, shotTeamId).then((p) => p && chooseShooter(p.id));
+              }}
+              error={addPlayerError}
+            />
+          )}
+          <button onClick={cancelShotWizard} className="text-xs text-white/40 mt-2">
+            annuler
+          </button>
+        </div>
+      )}
+
+      {shotStage === "assist" && (
+        <div className="mb-4 p-3 border border-bsh-orange/30 rounded-lg bg-white/5">
+          <p className="text-sm text-white/70 mb-2">Qui a fait la passe ?</p>
+          <div className="flex flex-wrap gap-1.5">
+            {rosterFor(shotTeamId)
+              .filter((p) => p.id !== shotShooterId)
+              .map((p) => (
+                <button
+                  key={p.id}
+                  onClick={() => finalizeShot(shotShooterId, p.id)}
+                  className="px-3 py-2 rounded-lg text-sm font-semibold bg-white/10 text-white/80 hover:bg-bsh-orange hover:text-black transition-colors"
+                >
+                  #{p.jersey_number ?? "-"} {p.name}
+                </button>
+              ))}
+            <button
+              onClick={() => finalizeShot(shotShooterId)}
+              className="px-3 py-2 rounded-lg text-sm font-semibold bg-white/5 text-white/50 border border-dashed border-white/20 hover:bg-white/10"
+            >
+              Pas de passe
+            </button>
+          </div>
+        </div>
+      )}
+
+    </>
+  );
+
+  const courtUi = (
+    <>
+      {/* Court diagram */}
+      <div className="max-w-md relative mb-8">
+        <CourtDiagram shots={courtShots} onCourtClick={handleCourtClick} />
+
+        {shotStage === "made_miss" && pendingShot && (
+          <div
+            className="absolute bg-bsh-black border border-bsh-orange rounded-lg p-2 flex flex-col gap-1 shadow-xl z-10"
+            style={{
+              left: `${pendingShot.x}%`,
+              top: `${pendingShot.y}%`,
+              transform: "translate(-50%, 8px)",
+            }}
+          >
+            <p className="text-xs text-bsh-gold font-bold text-center mb-1">{guess}</p>
+            <div className="flex gap-1">
+              <button
+                onClick={() => chooseMadeMiss(true)}
+                className="text-xs px-3 py-1.5 rounded bg-green-600 text-white font-bold"
+              >
+                Réussi ✓
+              </button>
+              <button
+                onClick={() => chooseMadeMiss(false)}
+                className="text-xs px-3 py-1.5 rounded bg-red-600/80 text-white font-bold"
+              >
+                Raté ✗
+              </button>
+            </div>
+            <button onClick={cancelShotWizard} className="text-xs text-white/40">
+              annuler
+            </button>
+          </div>
+        )}
+      </div>
+    </>
+  );
+
   return (
     <div>
       {/* Status + score bar */}
@@ -605,9 +739,7 @@ export default function LiveControls({
         </div>
       )}
 
-      {mode === "court" && (
-      <>
-      {!shotStage && (
+      {mode === "court" && !shotStage && (
         <>
           <div className="mb-2 flex flex-wrap items-center gap-3">
             <div className="flex rounded-lg overflow-hidden border border-white/10">
@@ -696,130 +828,46 @@ export default function LiveControls({
         </>
       )}
 
-      {/* Slide d'attribution -- étapes 2 à 4 (équipe / shooteur / passeur),
-          l'étape 1 (réussi/raté) est la bulle flottante sur le terrain
-          juste en dessous. */}
-      {shotStage === "team" && (
-        <div className="mb-4 p-3 border border-bsh-orange/30 rounded-lg bg-white/5">
-          <p className="text-sm text-white/70 mb-2">
-            Tir {shotMade ? "réussi" : "raté"} -- quelle équipe ?
-          </p>
-          <div className="flex gap-2">
-            {[homeTeam, awayTeam].map((t) => (
-              <button
-                key={t.id}
-                onClick={() => chooseShotTeam(t.id)}
-                className="flex-1 bg-white/10 hover:bg-bsh-orange hover:text-black rounded-lg py-3 font-bold text-sm transition-colors"
-              >
-                {t.name}
-              </button>
-            ))}
-          </div>
-          <button onClick={cancelShotWizard} className="text-xs text-white/40 mt-2">
-            annuler
-          </button>
-        </div>
+
+      {mode === "court" && (
+        <>
+          {wizardUi}
+          {courtUi}
+        </>
       )}
 
-      {shotStage === "shooter" && (
-        <div className="mb-4 p-3 border border-bsh-orange/30 rounded-lg bg-white/5">
-          <p className="text-sm text-white/70 mb-2">Qui a {shotMade ? "marqué" : "tenté"} le tir ?</p>
-          <div className="flex flex-wrap gap-1.5">
-            {rosterFor(shotTeamId).map((p) => (
-              <button
-                key={p.id}
-                onClick={() => chooseShooter(p.id)}
-                className="px-3 py-2 rounded-lg text-sm font-semibold bg-white/10 text-white/80 hover:bg-bsh-orange hover:text-black transition-colors"
-              >
-                #{p.jersey_number ?? "-"} {p.name}
-              </button>
-            ))}
-            <button
-              onClick={() => setAddingPlayer((v) => !v)}
-              className="px-3 py-2 rounded-lg text-sm font-semibold bg-white/5 text-white/50 border border-dashed border-white/20 hover:bg-white/10"
-            >
-              + Joueur
-            </button>
-          </div>
-          {addingPlayer && (
-            <QuickAddPanel
-              name={newPlayerName}
-              onNameChange={setNewPlayerName}
-              onPick={(letter) => {
-                addPlayer(letter, shotTeamId).then((p) => p && chooseShooter(p.id));
-              }}
-              onSubmit={() => {
-                addPlayer(newPlayerName, shotTeamId).then((p) => p && chooseShooter(p.id));
-              }}
-              error={addPlayerError}
-            />
-          )}
-          <button onClick={cancelShotWizard} className="text-xs text-white/40 mt-2">
-            annuler
-          </button>
-        </div>
-      )}
-
-      {shotStage === "assist" && (
-        <div className="mb-4 p-3 border border-bsh-orange/30 rounded-lg bg-white/5">
-          <p className="text-sm text-white/70 mb-2">Qui a fait la passe ?</p>
-          <div className="flex flex-wrap gap-1.5">
-            {rosterFor(shotTeamId)
-              .filter((p) => p.id !== shotShooterId)
-              .map((p) => (
+      {/* Mode feuille de stats : le terrain reste dispo dans un coin, replié
+          par défaut -- un tap sur 📍 l'ouvre pour placer un tir (optionnel). */}
+      {mode === "sheet" && (
+        <div className="fixed bottom-3 right-3 z-30">
+          {courtOpen || shotStage ? (
+            <div className="w-[min(92vw,22rem)] max-h-[80vh] overflow-y-auto bg-bsh-black border border-bsh-orange/40 rounded-lg p-2 shadow-xl">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs text-white/60">Placer un tir sur le terrain</span>
                 <button
-                  key={p.id}
-                  onClick={() => finalizeShot(shotShooterId, p.id)}
-                  className="px-3 py-2 rounded-lg text-sm font-semibold bg-white/10 text-white/80 hover:bg-bsh-orange hover:text-black transition-colors"
+                  onClick={() => {
+                    cancelShotWizard();
+                    setCourtOpen(false);
+                  }}
+                  className="text-white/60 hover:text-white px-2"
+                  aria-label="Fermer le terrain"
                 >
-                  #{p.jersey_number ?? "-"} {p.name}
+                  ✕
                 </button>
-              ))}
-            <button
-              onClick={() => finalizeShot(shotShooterId)}
-              className="px-3 py-2 rounded-lg text-sm font-semibold bg-white/5 text-white/50 border border-dashed border-white/20 hover:bg-white/10"
-            >
-              Pas de passe
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Court diagram */}
-      <div className="max-w-md relative mb-8">
-        <CourtDiagram shots={courtShots} onCourtClick={handleCourtClick} />
-
-        {shotStage === "made_miss" && pendingShot && (
-          <div
-            className="absolute bg-bsh-black border border-bsh-orange rounded-lg p-2 flex flex-col gap-1 shadow-xl z-10"
-            style={{
-              left: `${pendingShot.x}%`,
-              top: `${pendingShot.y}%`,
-              transform: "translate(-50%, 8px)",
-            }}
-          >
-            <p className="text-xs text-bsh-gold font-bold text-center mb-1">{guess}</p>
-            <div className="flex gap-1">
-              <button
-                onClick={() => chooseMadeMiss(true)}
-                className="text-xs px-3 py-1.5 rounded bg-green-600 text-white font-bold"
-              >
-                Réussi ✓
-              </button>
-              <button
-                onClick={() => chooseMadeMiss(false)}
-                className="text-xs px-3 py-1.5 rounded bg-red-600/80 text-white font-bold"
-              >
-                Raté ✗
-              </button>
+              </div>
+              {wizardUi}
+              {courtUi}
             </div>
-            <button onClick={cancelShotWizard} className="text-xs text-white/40">
-              annuler
+          ) : (
+            <button
+              onClick={() => setCourtOpen(true)}
+              className="w-12 h-12 rounded-full bg-white/10 border border-white/20 text-xl shadow-lg opacity-70 hover:opacity-100"
+              aria-label="Ouvrir le terrain"
+            >
+              📍
             </button>
-          </div>
-        )}
-      </div>
-      </>
+          )}
+        </div>
       )}
 
       {/* Box score live */}
