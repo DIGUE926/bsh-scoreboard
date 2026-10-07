@@ -6,7 +6,7 @@ import CourtDiagram, { ShotPoint, guessShotType } from "@/app/CourtDiagram";
 
 type Team = { id: string; name: string };
 type Player = { id: string; name: string; jersey_number: number | null };
-type EventType = "2PT" | "3PT" | "FT" | "REB" | "AST";
+type EventType = "2PT" | "3PT" | "FT" | "REB" | "AST" | "STL" | "BLK" | "TOV";
 type GameEvent = ShotPoint & {
   id: string;
   player_id: string;
@@ -20,6 +20,9 @@ type BoxRow = {
   pts: number;
   reb: number;
   ast: number;
+  stl: number;
+  blk: number;
+  tov: number;
   fgm: number;
   fga: number;
   ftm: number;
@@ -28,7 +31,7 @@ type BoxRow = {
 
 type StatDelta = Partial<Omit<BoxRow, "id">>;
 
-const EMPTY_ROW: Omit<BoxRow, "id"> = { pts: 0, reb: 0, ast: 0, fgm: 0, fga: 0, ftm: 0, fta: 0 };
+const EMPTY_ROW: Omit<BoxRow, "id"> = { pts: 0, reb: 0, ast: 0, stl: 0, blk: 0, tov: 0, fgm: 0, fga: 0, ftm: 0, fta: 0 };
 
 function deltaFor(eventType: EventType, made: boolean): StatDelta {
   switch (eventType) {
@@ -42,6 +45,12 @@ function deltaFor(eventType: EventType, made: boolean): StatDelta {
       return { reb: 1 };
     case "AST":
       return { ast: 1 };
+    case "STL":
+      return { stl: 1 };
+    case "BLK":
+      return { blk: 1 };
+    case "TOV":
+      return { tov: 1 };
   }
 }
 
@@ -51,6 +60,34 @@ function pointsFor(eventType: EventType, made: boolean): number {
   if (eventType === "2PT") return 2;
   if (eventType === "FT") return 1;
   return 0;
+}
+
+// Bouton de la feuille de stats : gros, tactile, un tap = une stat.
+function SheetButton({
+  children,
+  onClick,
+  tone,
+  small,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  tone?: "made" | "miss";
+  small?: boolean;
+}) {
+  const color =
+    tone === "made"
+      ? "bg-green-600/25 text-green-300 active:bg-green-600/60"
+      : tone === "miss"
+        ? "bg-red-600/15 text-red-300 active:bg-red-600/50"
+        : "bg-white/10 text-white/90 active:bg-white/30";
+  return (
+    <button
+      onClick={onClick}
+      className={`rounded-lg font-bold ${small ? "py-1.5 text-xs" : "py-3 text-sm"} ${color}`}
+    >
+      {children}
+    </button>
+  );
 }
 
 // Panneau d'ajout rapide de joueur -- purement présentationnel (le
@@ -149,6 +186,9 @@ export default function LiveControls({
         pts: s.pts ?? 0,
         reb: s.reb ?? 0,
         ast: s.ast ?? 0,
+        stl: s.stl ?? 0,
+        blk: s.blk ?? 0,
+        tov: s.tov ?? 0,
         fgm: s.fgm ?? 0,
         fga: s.fga ?? 0,
         ftm: s.ftm ?? 0,
@@ -158,6 +198,12 @@ export default function LiveControls({
     return map;
   });
 
+  // Mode de saisie : "sheet" = feuille de stats (un tap par stat, aucune
+  // formation nécessaire), "court" = clic sur le terrain (position des tirs).
+  // Les deux écrivent les mêmes game_events -> les notifications du site
+  // (bsh-web /api/push/live) fonctionnent à l'identique.
+  const [mode, setMode] = useState<"sheet" | "court">("sheet");
+  const [courtOpen, setCourtOpen] = useState(false);
   const [selectedTeamId, setSelectedTeamId] = useState<string>(homeTeam.id);
   const [selectedPlayerId, setSelectedPlayerId] = useState<string>("");
   const [pendingShot, setPendingShot] = useState<{ x: number; y: number } | null>(null);
@@ -263,6 +309,9 @@ export default function LiveControls({
       pts: current.pts + (delta.pts ?? 0),
       reb: current.reb + (delta.reb ?? 0),
       ast: current.ast + (delta.ast ?? 0),
+      stl: current.stl + (delta.stl ?? 0),
+      blk: current.blk + (delta.blk ?? 0),
+      tov: current.tov + (delta.tov ?? 0),
       fgm: current.fgm + (delta.fgm ?? 0),
       fga: current.fga + (delta.fga ?? 0),
       ftm: current.ftm + (delta.ftm ?? 0),
@@ -276,6 +325,9 @@ export default function LiveControls({
       pts: next.pts,
       reb: next.reb,
       ast: next.ast,
+      stl: next.stl,
+      blk: next.blk,
+      tov: next.tov,
       fgm: next.fgm,
       fga: next.fga,
       ftm: next.ftm,
@@ -395,156 +447,18 @@ export default function LiveControls({
     if (points > 0) bumpScore(last.team_id, -points);
   }
 
+  const lastEvent = events[events.length - 1];
+  const lastEventLabel = lastEvent
+    ? `${allPlayers.find((p) => p.id === lastEvent.player_id)?.name ?? "?"} ${
+        lastEvent.made ? "" : "✗ "
+      }${lastEvent.event_type === "FT" ? "LF" : lastEvent.event_type}`
+    : "";
+
   const guess = pendingShot ? guessShotType(pendingShot.x, pendingShot.y) : "2PT";
   const courtShots = events.filter((e) => e.event_type === "2PT" || e.event_type === "3PT");
 
-  return (
-    <div>
-      {/* Status + score bar */}
-      <div className="flex flex-wrap items-center gap-4 mb-6 p-4 border border-white/10 rounded-lg bg-white/5">
-        <div className="flex items-center gap-2">
-          <span
-            className={`w-2 h-2 rounded-full ${
-              status === "live" ? "bg-red-500 animate-pulse" : "bg-white/30"
-            }`}
-          />
-          <span className="text-xs uppercase text-white/60">{status}</span>
-        </div>
-        {status !== "live" && status !== "completed" && (
-          <button onClick={goLive} className="bg-red-600 text-white text-sm font-bold rounded px-3 py-1.5">
-            ● Démarrer le direct
-          </button>
-        )}
-        {status === "live" && (
-          <button onClick={endGame} className="bg-white/10 text-white text-sm font-bold rounded px-3 py-1.5 hover:bg-white/20">
-            Terminer le match
-          </button>
-        )}
-
-        <div className="flex items-center gap-2 ml-auto">
-          <button onClick={() => changePeriod(-1)} className="w-7 h-7 rounded bg-white/10 hover:bg-white/20">−</button>
-          <span className="text-sm text-white/70 w-16 text-center">Période {period}</span>
-          <button onClick={() => changePeriod(1)} className="w-7 h-7 rounded bg-white/10 hover:bg-white/20">+</button>
-        </div>
-
-        <input
-          value={clock}
-          onChange={(e) => setClock(e.target.value)}
-          onBlur={saveClock}
-          placeholder="8:42"
-          className="w-20 bg-white/5 border border-white/10 rounded px-2 py-1 text-center text-sm focus:border-bsh-orange outline-none"
-        />
-      </div>
-
-      {/* Score display */}
-      <div className="grid grid-cols-2 gap-4 mb-6">
-        {[{ team: homeTeam, score: homeScore }, { team: awayTeam, score: awayScore }].map(({ team, score }) => (
-          <div key={team.id} className="border border-white/10 rounded-lg p-4 text-center bg-white/5">
-            <p className="text-sm text-white/60 mb-1">{team.name}</p>
-            <p className="font-display text-4xl text-bsh-gold">{score}</p>
-          </div>
-        ))}
-      </div>
-
-      {/* En dehors d'un tir en cours d'attribution : contrôles habituels
-          (équipe/joueur actif + LF/rebond/passe manuels). Pendant un tir
-          (shotStage non-null), ce bloc laisse la place au slide juste en
-          dessous -- retour Digue 2026-08-31 ("ca doit etre comme un
-          slide") : le terrain se tape en premier, on attribue ensuite. */}
-      {!shotStage && (
-        <>
-          <div className="mb-2 flex flex-wrap items-center gap-3">
-            <div className="flex rounded-lg overflow-hidden border border-white/10">
-              {[homeTeam, awayTeam].map((t) => (
-                <button
-                  key={t.id}
-                  onClick={() => {
-                    setSelectedTeamId(t.id);
-                    setSelectedPlayerId("");
-                  }}
-                  className={`px-3 py-1.5 text-sm ${
-                    selectedTeamId === t.id ? "bg-bsh-orange text-black font-bold" : "bg-white/5 text-white/70"
-                  }`}
-                >
-                  {t.name}
-                </button>
-              ))}
-            </div>
-
-            {events.length > 0 && (
-              <button onClick={undoLastEvent} className="text-sm text-white/50 hover:text-white ml-auto">
-                ↩ Annuler dernière action
-              </button>
-            )}
-          </div>
-
-          {/* Joueurs en gros boutons tactiles -- un tap suffit, pas de menu
-              déroulant à ouvrir/scroller en plein match (retour Digue
-              2026-08-31 : "trop long pour choisir les joueurs"). Sert aux
-              actions manuelles (LF/rebond/passe) ci-dessous -- les tirs
-              passent maintenant par le slide déclenché au clic sur le
-              terrain. */}
-          <div className="mb-4 flex flex-wrap gap-1.5">
-            {players.map((p) => (
-              <button
-                key={p.id}
-                onClick={() => setSelectedPlayerId(p.id)}
-                className={`px-3 py-2 rounded-lg text-sm font-semibold transition-colors ${
-                  selectedPlayerId === p.id
-                    ? "bg-bsh-orange text-black"
-                    : "bg-white/10 text-white/80 hover:bg-white/20"
-                }`}
-              >
-                #{p.jersey_number ?? "-"} {p.name}
-              </button>
-            ))}
-            <button
-              onClick={() => setAddingPlayer((v) => !v)}
-              className="px-3 py-2 rounded-lg text-sm font-semibold bg-white/5 text-white/50 border border-dashed border-white/20 hover:bg-white/10"
-            >
-              + Joueur
-            </button>
-          </div>
-
-          {addingPlayer && (
-            <QuickAddPanel
-              name={newPlayerName}
-              onNameChange={setNewPlayerName}
-              onPick={(letter) => {
-                addPlayer(letter, selectedTeamId).then((p) => p && setSelectedPlayerId(p.id));
-              }}
-              onSubmit={() => {
-                addPlayer(newPlayerName, selectedTeamId).then((p) => p && setSelectedPlayerId(p.id));
-              }}
-              error={addPlayerError}
-            />
-          )}
-
-          {selectedPlayerId && (
-            <div className="flex flex-wrap gap-2 mb-4">
-              <button onClick={() => recordEvent("FT", true)} className="text-sm bg-green-600/20 text-green-400 rounded px-3 py-1.5">
-                LF réussi
-              </button>
-              <button onClick={() => recordEvent("FT", false)} className="text-sm bg-red-600/20 text-red-400 rounded px-3 py-1.5">
-                LF raté
-              </button>
-              <button onClick={() => recordEvent("REB", true)} className="text-sm bg-white/10 text-white/80 rounded px-3 py-1.5">
-                Rebond
-              </button>
-              <button onClick={() => recordEvent("AST", true)} className="text-sm bg-white/10 text-white/80 rounded px-3 py-1.5">
-                Passe déc.
-              </button>
-            </div>
-          )}
-
-          {!selectedPlayerId && (
-            <p className="text-xs text-white/40 mb-2">
-              Tape le terrain pour un tir, ou choisis un joueur pour un LF/rebond/passe.
-            </p>
-          )}
-        </>
-      )}
-
+  const wizardUi = (
+    <>
       {/* Slide d'attribution -- étapes 2 à 4 (équipe / shooteur / passeur),
           l'étape 1 (réussi/raté) est la bulle flottante sur le terrain
           juste en dessous. */}
@@ -634,6 +548,11 @@ export default function LiveControls({
         </div>
       )}
 
+    </>
+  );
+
+  const courtUi = (
+    <>
       {/* Court diagram */}
       <div className="max-w-md relative mb-8">
         <CourtDiagram shots={courtShots} onCourtClick={handleCourtClick} />
@@ -668,6 +587,288 @@ export default function LiveControls({
           </div>
         )}
       </div>
+    </>
+  );
+
+  return (
+    <div>
+      {/* Status + score bar */}
+      <div className="flex flex-wrap items-center gap-4 mb-6 p-4 border border-white/10 rounded-lg bg-white/5">
+        <div className="flex items-center gap-2">
+          <span
+            className={`w-2 h-2 rounded-full ${
+              status === "live" ? "bg-red-500 animate-pulse" : "bg-white/30"
+            }`}
+          />
+          <span className="text-xs uppercase text-white/60">{status}</span>
+        </div>
+        {status !== "live" && status !== "completed" && (
+          <button onClick={goLive} className="bg-red-600 text-white text-sm font-bold rounded px-3 py-1.5">
+            ● Démarrer le direct
+          </button>
+        )}
+        {status === "live" && (
+          <button onClick={endGame} className="bg-white/10 text-white text-sm font-bold rounded px-3 py-1.5 hover:bg-white/20">
+            Terminer le match
+          </button>
+        )}
+
+        <div className="flex items-center gap-2 ml-auto">
+          <button onClick={() => changePeriod(-1)} className="w-7 h-7 rounded bg-white/10 hover:bg-white/20">−</button>
+          <span className="text-sm text-white/70 w-16 text-center">Période {period}</span>
+          <button onClick={() => changePeriod(1)} className="w-7 h-7 rounded bg-white/10 hover:bg-white/20">+</button>
+        </div>
+
+        <input
+          value={clock}
+          onChange={(e) => setClock(e.target.value)}
+          onBlur={saveClock}
+          placeholder="8:42"
+          className="w-20 bg-white/5 border border-white/10 rounded px-2 py-1 text-center text-sm focus:border-bsh-orange outline-none"
+        />
+      </div>
+
+      {/* Score display */}
+      <div className="grid grid-cols-2 gap-4 mb-6">
+        {[{ team: homeTeam, score: homeScore }, { team: awayTeam, score: awayScore }].map(({ team, score }) => (
+          <div key={team.id} className="border border-white/10 rounded-lg p-4 text-center bg-white/5">
+            <p className="text-sm text-white/60 mb-1">{team.name}</p>
+            <p className="font-display text-4xl text-bsh-gold">{score}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* En dehors d'un tir en cours d'attribution : contrôles habituels
+          (équipe/joueur actif + LF/rebond/passe manuels). Pendant un tir
+          (shotStage non-null), ce bloc laisse la place au slide juste en
+          dessous -- retour Digue 2026-08-31 ("ca doit etre comme un
+          slide") : le terrain se tape en premier, on attribue ensuite. */}
+      {/* Bascule de mode + annulation (communes aux deux modes) */}
+      <div className="mb-3 flex flex-wrap items-center gap-3">
+        <div className="flex rounded-lg overflow-hidden border border-white/10">
+          {(["sheet", "court"] as const).map((m) => (
+            <button
+              key={m}
+              onClick={() => {
+                cancelShotWizard();
+                setMode(m);
+              }}
+              className={`px-3 py-1.5 text-sm ${
+                mode === m ? "bg-bsh-orange text-black font-bold" : "bg-white/5 text-white/70"
+              }`}
+            >
+              {m === "sheet" ? "Feuille de stats" : "Terrain"}
+            </button>
+          ))}
+        </div>
+        {events.length > 0 && (
+          <button onClick={undoLastEvent} className="text-sm text-white/60 hover:text-white ml-auto">
+            ↩ Annuler : {lastEventLabel}
+          </button>
+        )}
+      </div>
+
+      {mode === "sheet" && (
+        <div className="mb-8">
+          <div className="mb-3 flex rounded-lg overflow-hidden border border-white/10 w-fit">
+            {[homeTeam, awayTeam].map((t) => (
+              <button
+                key={t.id}
+                onClick={() => setSelectedTeamId(t.id)}
+                className={`px-4 py-2 text-sm ${
+                  selectedTeamId === t.id ? "bg-bsh-orange text-black font-bold" : "bg-white/5 text-white/70"
+                }`}
+              >
+                {t.name}
+              </button>
+            ))}
+          </div>
+
+          <div className="space-y-2">
+            {players.map((p) => {
+              const b = box[p.id];
+              return (
+                <div key={p.id} className="p-2 border border-white/10 rounded-lg bg-white/5">
+                  <div className="flex items-baseline justify-between mb-2">
+                    <span className="font-semibold text-sm">
+                      #{p.jersey_number ?? "-"} {p.name}
+                    </span>
+                    <span className="text-xs text-white/60 tabular-nums">
+                      <b className="text-bsh-orange text-base">{b?.pts ?? 0}</b> pts · {b?.reb ?? 0} reb ·{" "}
+                      {b?.ast ?? 0} ast · {b?.stl ?? 0} stl · {b?.blk ?? 0} blk · {b?.tov ?? 0} tov
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-6 gap-1.5">
+                    <SheetButton tone="made" onClick={() => insertGameEvent(p.id, selectedTeamId, "FT", true)}>+1</SheetButton>
+                    <SheetButton tone="made" onClick={() => insertGameEvent(p.id, selectedTeamId, "2PT", true)}>+2</SheetButton>
+                    <SheetButton tone="made" onClick={() => insertGameEvent(p.id, selectedTeamId, "3PT", true)}>+3</SheetButton>
+                    <SheetButton onClick={() => insertGameEvent(p.id, selectedTeamId, "REB", true)}>REB</SheetButton>
+                    <SheetButton onClick={() => insertGameEvent(p.id, selectedTeamId, "AST", true)}>AST</SheetButton>
+                    <SheetButton tone="miss" onClick={() => insertGameEvent(p.id, selectedTeamId, "2PT", false)}>✗ tir</SheetButton>
+                  </div>
+                  <div className="grid grid-cols-6 gap-1.5 mt-1.5">
+                    <SheetButton small onClick={() => insertGameEvent(p.id, selectedTeamId, "STL", true)}>STL</SheetButton>
+                    <SheetButton small onClick={() => insertGameEvent(p.id, selectedTeamId, "BLK", true)}>BLK</SheetButton>
+                    <SheetButton tone="miss" small onClick={() => insertGameEvent(p.id, selectedTeamId, "TOV", true)}>TOV</SheetButton>
+                    <SheetButton tone="miss" small onClick={() => insertGameEvent(p.id, selectedTeamId, "FT", false)}>✗ LF</SheetButton>
+                    <SheetButton tone="miss" small onClick={() => insertGameEvent(p.id, selectedTeamId, "3PT", false)}>✗ 3pts</SheetButton>
+                  </div>
+                </div>
+              );
+            })}
+            <button
+              onClick={() => setAddingPlayer((v) => !v)}
+              className="px-3 py-2 rounded-lg text-sm font-semibold bg-white/5 text-white/50 border border-dashed border-white/20 hover:bg-white/10"
+            >
+              + Joueur
+            </button>
+            {addingPlayer && (
+              <QuickAddPanel
+                name={newPlayerName}
+                onNameChange={setNewPlayerName}
+                onPick={(letter) => {
+                  addPlayer(letter, selectedTeamId);
+                }}
+                onSubmit={() => {
+                  addPlayer(newPlayerName, selectedTeamId);
+                }}
+                error={addPlayerError}
+              />
+            )}
+          </div>
+        </div>
+      )}
+
+      {mode === "court" && !shotStage && (
+        <>
+          <div className="mb-2 flex flex-wrap items-center gap-3">
+            <div className="flex rounded-lg overflow-hidden border border-white/10">
+              {[homeTeam, awayTeam].map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => {
+                    setSelectedTeamId(t.id);
+                    setSelectedPlayerId("");
+                  }}
+                  className={`px-3 py-1.5 text-sm ${
+                    selectedTeamId === t.id ? "bg-bsh-orange text-black font-bold" : "bg-white/5 text-white/70"
+                  }`}
+                >
+                  {t.name}
+                </button>
+              ))}
+            </div>
+
+          </div>
+
+          {/* Joueurs en gros boutons tactiles -- un tap suffit, pas de menu
+              déroulant à ouvrir/scroller en plein match (retour Digue
+              2026-08-31 : "trop long pour choisir les joueurs"). Sert aux
+              actions manuelles (LF/rebond/passe) ci-dessous -- les tirs
+              passent maintenant par le slide déclenché au clic sur le
+              terrain. */}
+          <div className="mb-4 flex flex-wrap gap-1.5">
+            {players.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => setSelectedPlayerId(p.id)}
+                className={`px-3 py-2 rounded-lg text-sm font-semibold transition-colors ${
+                  selectedPlayerId === p.id
+                    ? "bg-bsh-orange text-black"
+                    : "bg-white/10 text-white/80 hover:bg-white/20"
+                }`}
+              >
+                #{p.jersey_number ?? "-"} {p.name}
+              </button>
+            ))}
+            <button
+              onClick={() => setAddingPlayer((v) => !v)}
+              className="px-3 py-2 rounded-lg text-sm font-semibold bg-white/5 text-white/50 border border-dashed border-white/20 hover:bg-white/10"
+            >
+              + Joueur
+            </button>
+          </div>
+
+          {addingPlayer && (
+            <QuickAddPanel
+              name={newPlayerName}
+              onNameChange={setNewPlayerName}
+              onPick={(letter) => {
+                addPlayer(letter, selectedTeamId).then((p) => p && setSelectedPlayerId(p.id));
+              }}
+              onSubmit={() => {
+                addPlayer(newPlayerName, selectedTeamId).then((p) => p && setSelectedPlayerId(p.id));
+              }}
+              error={addPlayerError}
+            />
+          )}
+
+          {selectedPlayerId && (
+            <div className="flex flex-wrap gap-2 mb-4">
+              <button onClick={() => recordEvent("FT", true)} className="text-sm bg-green-600/20 text-green-400 rounded px-3 py-1.5">
+                LF réussi
+              </button>
+              <button onClick={() => recordEvent("FT", false)} className="text-sm bg-red-600/20 text-red-400 rounded px-3 py-1.5">
+                LF raté
+              </button>
+              <button onClick={() => recordEvent("REB", true)} className="text-sm bg-white/10 text-white/80 rounded px-3 py-1.5">
+                Rebond
+              </button>
+              <button onClick={() => recordEvent("AST", true)} className="text-sm bg-white/10 text-white/80 rounded px-3 py-1.5">
+                Passe déc.
+              </button>
+            </div>
+          )}
+
+          {!selectedPlayerId && (
+            <p className="text-xs text-white/40 mb-2">
+              Tape le terrain pour un tir, ou choisis un joueur pour un LF/rebond/passe.
+            </p>
+          )}
+        </>
+      )}
+
+
+      {mode === "court" && (
+        <>
+          {wizardUi}
+          {courtUi}
+        </>
+      )}
+
+      {/* Mode feuille de stats : le terrain reste dispo dans un coin, replié
+          par défaut -- un tap sur 📍 l'ouvre pour placer un tir (optionnel). */}
+      {mode === "sheet" && (
+        <div className="fixed bottom-3 right-3 z-30">
+          {courtOpen || shotStage ? (
+            <div className="w-[min(92vw,22rem)] max-h-[80vh] overflow-y-auto bg-bsh-black border border-bsh-orange/40 rounded-lg p-2 shadow-xl">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs text-white/60">Placer un tir sur le terrain</span>
+                <button
+                  onClick={() => {
+                    cancelShotWizard();
+                    setCourtOpen(false);
+                  }}
+                  className="text-white/60 hover:text-white px-2"
+                  aria-label="Fermer le terrain"
+                >
+                  ✕
+                </button>
+              </div>
+              {wizardUi}
+              {courtUi}
+            </div>
+          ) : (
+            <button
+              onClick={() => setCourtOpen(true)}
+              className="w-12 h-12 rounded-full bg-white/10 border border-white/20 text-xl shadow-lg opacity-70 hover:opacity-100"
+              aria-label="Ouvrir le terrain"
+            >
+              📍
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Box score live */}
       <div>
