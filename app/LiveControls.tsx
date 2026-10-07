@@ -6,7 +6,7 @@ import CourtDiagram, { ShotPoint, guessShotType } from "@/app/CourtDiagram";
 
 type Team = { id: string; name: string };
 type Player = { id: string; name: string; jersey_number: number | null };
-type EventType = "2PT" | "3PT" | "FT" | "REB" | "AST";
+type EventType = "2PT" | "3PT" | "FT" | "REB" | "AST" | "STL" | "BLK" | "TOV";
 type GameEvent = ShotPoint & {
   id: string;
   player_id: string;
@@ -20,6 +20,9 @@ type BoxRow = {
   pts: number;
   reb: number;
   ast: number;
+  stl: number;
+  blk: number;
+  tov: number;
   fgm: number;
   fga: number;
   ftm: number;
@@ -28,7 +31,7 @@ type BoxRow = {
 
 type StatDelta = Partial<Omit<BoxRow, "id">>;
 
-const EMPTY_ROW: Omit<BoxRow, "id"> = { pts: 0, reb: 0, ast: 0, fgm: 0, fga: 0, ftm: 0, fta: 0 };
+const EMPTY_ROW: Omit<BoxRow, "id"> = { pts: 0, reb: 0, ast: 0, stl: 0, blk: 0, tov: 0, fgm: 0, fga: 0, ftm: 0, fta: 0 };
 
 function deltaFor(eventType: EventType, made: boolean): StatDelta {
   switch (eventType) {
@@ -42,6 +45,12 @@ function deltaFor(eventType: EventType, made: boolean): StatDelta {
       return { reb: 1 };
     case "AST":
       return { ast: 1 };
+    case "STL":
+      return { stl: 1 };
+    case "BLK":
+      return { blk: 1 };
+    case "TOV":
+      return { tov: 1 };
   }
 }
 
@@ -177,6 +186,9 @@ export default function LiveControls({
         pts: s.pts ?? 0,
         reb: s.reb ?? 0,
         ast: s.ast ?? 0,
+        stl: s.stl ?? 0,
+        blk: s.blk ?? 0,
+        tov: s.tov ?? 0,
         fgm: s.fgm ?? 0,
         fga: s.fga ?? 0,
         ftm: s.ftm ?? 0,
@@ -296,6 +308,9 @@ export default function LiveControls({
       pts: current.pts + (delta.pts ?? 0),
       reb: current.reb + (delta.reb ?? 0),
       ast: current.ast + (delta.ast ?? 0),
+      stl: current.stl + (delta.stl ?? 0),
+      blk: current.blk + (delta.blk ?? 0),
+      tov: current.tov + (delta.tov ?? 0),
       fgm: current.fgm + (delta.fgm ?? 0),
       fga: current.fga + (delta.fga ?? 0),
       ftm: current.ftm + (delta.ftm ?? 0),
@@ -309,6 +324,9 @@ export default function LiveControls({
       pts: next.pts,
       reb: next.reb,
       ast: next.ast,
+      stl: next.stl,
+      blk: next.blk,
+      tov: next.tov,
       fgm: next.fgm,
       fga: next.fga,
       ftm: next.ftm,
@@ -543,7 +561,7 @@ export default function LiveControls({
                     </span>
                     <span className="text-xs text-white/60 tabular-nums">
                       <b className="text-bsh-orange text-base">{b?.pts ?? 0}</b> pts · {b?.reb ?? 0} reb ·{" "}
-                      {b?.ast ?? 0} ast
+                      {b?.ast ?? 0} ast · {b?.stl ?? 0} stl · {b?.blk ?? 0} blk · {b?.tov ?? 0} tov
                     </span>
                   </div>
                   <div className="grid grid-cols-6 gap-1.5">
@@ -555,6 +573,9 @@ export default function LiveControls({
                     <SheetButton tone="miss" onClick={() => insertGameEvent(p.id, selectedTeamId, "2PT", false)}>✗ tir</SheetButton>
                   </div>
                   <div className="grid grid-cols-6 gap-1.5 mt-1.5">
+                    <SheetButton small onClick={() => insertGameEvent(p.id, selectedTeamId, "STL", true)}>STL</SheetButton>
+                    <SheetButton small onClick={() => insertGameEvent(p.id, selectedTeamId, "BLK", true)}>BLK</SheetButton>
+                    <SheetButton tone="miss" small onClick={() => insertGameEvent(p.id, selectedTeamId, "TOV", true)}>TOV</SheetButton>
                     <SheetButton tone="miss" small onClick={() => insertGameEvent(p.id, selectedTeamId, "FT", false)}>✗ LF</SheetButton>
                     <SheetButton tone="miss" small onClick={() => insertGameEvent(p.id, selectedTeamId, "3PT", false)}>✗ 3pts</SheetButton>
                   </div>

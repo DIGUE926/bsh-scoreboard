@@ -4,7 +4,7 @@ export type ShotPoint = {
   x: number;
   y: number;
   made: boolean;
-  event_type: "2PT" | "3PT" | "FT" | "REB" | "AST";
+  event_type: "2PT" | "3PT" | "FT" | "REB" | "AST" | "STL" | "BLK" | "TOV";
 };
 
 // Demi-terrain dessiné en pourcentage (0-100) sur les deux axes, mais un
