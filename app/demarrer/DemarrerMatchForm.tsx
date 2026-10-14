@@ -34,11 +34,14 @@ export default function DemarrerMatchForm() {
     async function loadLeagues() {
       const ahbbEnabled = await isScoreboardAhbbEnabled();
       let query = supabase.from("leagues").select("id, name, slug").order("name");
-      if (!ahbbEnabled) query = query.eq("slug", "suble");
+      if (!ahbbEnabled) query = query.neq("slug", "ahbb");
       const { data } = await query;
       if (data) {
         setLeagues(data);
-        if (data.length > 0) setLeagueId(data[0].id);
+        // Répétition (ligue cachée) choisie par défaut : un test ne doit
+        // jamais atterrir par erreur dans une ligue publique.
+        const defaut = data.find((l) => l.slug === "repetition") ?? data[0];
+        if (defaut) setLeagueId(defaut.id);
       }
     }
     loadLeagues();
