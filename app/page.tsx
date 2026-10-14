@@ -31,7 +31,9 @@ export default async function Home() {
     .in("status", ["scheduled", "live"])
     .order("game_date", { ascending: true })
     .limit(20);
-  if (!ahbbEnabled) gamesQuery = gamesQuery.eq("league.slug", "suble");
+  // Toutes les ligues sauf AHBB (dont Répétition, pour tester sans toucher
+  // aux ligues publiques).
+  if (!ahbbEnabled) gamesQuery = gamesQuery.neq("league.slug", "ahbb");
 
   const { data: games } = await gamesQuery;
 

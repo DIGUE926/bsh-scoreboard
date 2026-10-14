@@ -227,6 +227,9 @@ export default function LiveControls({
   const [addingPlayer, setAddingPlayer] = useState(false);
   const [newPlayerName, setNewPlayerName] = useState("");
   const [addPlayerError, setAddPlayerError] = useState<string | null>(null);
+  // Erreur d'enregistrement d'une stat : affichée en rouge au lieu d'échouer
+  // en silence (retour Digue 2026-10-14 : stats tapées, rien en base).
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const players = selectedTeamId === homeTeam.id ? homeRoster : awayRoster;
   const allPlayers = [...homeRoster, ...awayRoster];
@@ -371,7 +374,12 @@ export default function LiveControls({
       .select()
       .single();
 
-    if (!error && data) {
+    if (error || !data) {
+      setSaveError("Stat NON enregistrée : " + (error?.message ?? "aucune réponse du serveur") + ". Vérifie la connexion puis retape.");
+      return;
+    }
+    setSaveError(null);
+    {
       setEvents((prev) => [...prev, data as GameEvent]);
       await applyDelta(playerId, deltaFor(eventType, made));
       if (points > 0) bumpScore(teamId, points);
@@ -593,6 +601,11 @@ export default function LiveControls({
   return (
     <div>
       {/* Status + score bar */}
+      {saveError && (
+        <div className="mb-4 p-3 rounded border border-red-500 bg-red-600/20 text-red-300 text-sm font-semibold">
+          {saveError}
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-4 mb-6 p-4 border border-white/10 rounded-lg bg-white/5">
         <div className="flex items-center gap-2">
           <span
@@ -704,7 +717,7 @@ export default function LiveControls({
                     <SheetButton tone="made" onClick={() => insertGameEvent(p.id, selectedTeamId, "3PT", true)}>+3</SheetButton>
                     <SheetButton onClick={() => insertGameEvent(p.id, selectedTeamId, "REB", true)}>REB</SheetButton>
                     <SheetButton onClick={() => insertGameEvent(p.id, selectedTeamId, "AST", true)}>AST</SheetButton>
-                    <SheetButton tone="miss" onClick={() => insertGameEvent(p.id, selectedTeamId, "2PT", false)}>✗ tir</SheetButton>
+                    <SheetButton tone="miss" onClick={() => insertGameEvent(p.id, selectedTeamId, "2PT", false)}>✗ 2pts</SheetButton>
                   </div>
                   <div className="grid grid-cols-6 gap-1.5 mt-1.5">
                     <SheetButton small onClick={() => insertGameEvent(p.id, selectedTeamId, "STL", true)}>STL</SheetButton>
