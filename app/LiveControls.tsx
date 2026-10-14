@@ -94,15 +94,26 @@ function SheetButton({
 // composant qui l'utilise décide de la cible et de ce qui se passe une fois
 // le joueur créé/sélectionné). Défini au niveau module, pas dans le corps de
 // LiveControls, pour éviter de recréer un composant à chaque rendu.
+// "#12 Jean", "#12" pour un joueur saisi au numéro seul, "Jean" sans numéro.
+function joueurLabel(p: Player): string {
+  const n = p.jersey_number;
+  if (n == null) return p.name;
+  return p.name === `#${n}` ? `#${n}` : `#${n} ${p.name}`;
+}
+
 function QuickAddPanel({
   name,
   onNameChange,
+  number,
+  onNumberChange,
   onPick,
   onSubmit,
   error,
 }: {
   name: string;
   onNameChange: (v: string) => void;
+  number: string;
+  onNumberChange: (v: string) => void;
   onPick: (letter: string) => void;
   onSubmit: () => void;
   error: string | null;
@@ -121,12 +132,23 @@ function QuickAddPanel({
       ))}
       <span className="text-xs text-white/50 mx-1">ou</span>
       <input
+        value={number}
+        onChange={(e) => onNumberChange(e.target.value.replace(/\D/g, "").slice(0, 3))}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") onSubmit();
+        }}
+        inputMode="numeric"
+        placeholder="N°"
+        aria-label="Numéro du joueur"
+        className="w-16 bg-white/5 border border-white/10 rounded px-3 py-1.5 text-sm focus:border-bsh-orange outline-none"
+      />
+      <input
         value={name}
         onChange={(e) => onNameChange(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Enter") onSubmit();
         }}
-        placeholder="Nom du joueur"
+        placeholder="Nom (facultatif avec un n°)"
         className="bg-white/5 border border-white/10 rounded px-3 py-1.5 text-sm focus:border-bsh-orange outline-none"
       />
       <button onClick={onSubmit} className="text-sm bg-bsh-orange text-black font-bold rounded px-3 py-1.5">
@@ -226,6 +248,7 @@ export default function LiveControls({
   const [awayRoster, setAwayRoster] = useState<Player[]>(awayPlayers);
   const [addingPlayer, setAddingPlayer] = useState(false);
   const [newPlayerName, setNewPlayerName] = useState("");
+  const [newPlayerNumber, setNewPlayerNumber] = useState("");
   const [addPlayerError, setAddPlayerError] = useState<string | null>(null);
   // Erreur d'enregistrement d'une stat : affichée en rouge au lieu d'échouer
   // en silence (retour Digue 2026-10-14 : stats tapées, rien en base).
@@ -240,21 +263,35 @@ export default function LiveControls({
   // ou pour ajouter rapidement un remplaçant non listé. Retourne le joueur
   // (créé ou existant) pour que l'appelant décide de la suite -- utilisé à
   // la fois par la sélection manuelle et par le slide d'attribution de tir.
-  async function addPlayer(rawName: string, teamId: string): Promise<Player | null> {
-    const name = rawName.trim();
+  // Numéro seul accepté (retour Digue 2026-10-14) : le joueur s'appelle
+  // alors "#12" avec jersey_number = 12. Un nom tapé en chiffres vaut un n°.
+  async function addPlayer(rawName: string, teamId: string, rawNumber = ""): Promise<Player | null> {
+    let numero = rawNumber.trim();
+    let name = rawName.trim();
+    if (!numero && /^\d{1,3}$/.test(name)) {
+      numero = name;
+      name = "";
+    }
+    const jersey = numero ? parseInt(numero, 10) : null;
+    if (!name && jersey != null) name = `#${jersey}`;
     if (!name) return null;
     setAddPlayerError(null);
 
-    const existing = rosterFor(teamId).find((p) => p.name.toLowerCase() === name.toLowerCase());
+    const existing = rosterFor(teamId).find((p) =>
+      jersey != null && p.jersey_number === jersey
+        ? true
+        : p.name.toLowerCase() === name.toLowerCase()
+    );
     if (existing) {
       setAddingPlayer(false);
       setNewPlayerName("");
+      setNewPlayerNumber("");
       return existing;
     }
 
     const { data, error } = await supabase
       .from("players")
-      .insert({ team_id: teamId, name })
+      .insert({ team_id: teamId, name, jersey_number: jersey })
       .select("id, name, jersey_number")
       .single();
 
@@ -267,6 +304,7 @@ export default function LiveControls({
     else setAwayRoster((prev) => [...prev, data]);
     setAddingPlayer(false);
     setNewPlayerName("");
+    setNewPlayerNumber("");
     return data;
   }
 
@@ -502,7 +540,7 @@ export default function LiveControls({
                 onClick={() => chooseShooter(p.id)}
                 className="px-3 py-2 rounded-lg text-sm font-semibold bg-white/10 text-white/80 hover:bg-bsh-orange hover:text-black transition-colors"
               >
-                #{p.jersey_number ?? "-"} {p.name}
+                {joueurLabel(p)}
               </button>
             ))}
             <button
@@ -516,11 +554,13 @@ export default function LiveControls({
             <QuickAddPanel
               name={newPlayerName}
               onNameChange={setNewPlayerName}
+              number={newPlayerNumber}
+              onNumberChange={setNewPlayerNumber}
               onPick={(letter) => {
                 addPlayer(letter, shotTeamId).then((p) => p && chooseShooter(p.id));
               }}
               onSubmit={() => {
-                addPlayer(newPlayerName, shotTeamId).then((p) => p && chooseShooter(p.id));
+                addPlayer(newPlayerName, shotTeamId, newPlayerNumber).then((p) => p && chooseShooter(p.id));
               }}
               error={addPlayerError}
             />
@@ -543,7 +583,7 @@ export default function LiveControls({
                   onClick={() => finalizeShot(shotShooterId, p.id)}
                   className="px-3 py-2 rounded-lg text-sm font-semibold bg-white/10 text-white/80 hover:bg-bsh-orange hover:text-black transition-colors"
                 >
-                  #{p.jersey_number ?? "-"} {p.name}
+                  {joueurLabel(p)}
                 </button>
               ))}
             <button
@@ -704,7 +744,7 @@ export default function LiveControls({
                 <div key={p.id} className="p-2 border border-white/10 rounded-lg bg-white/5">
                   <div className="flex items-baseline justify-between mb-2">
                     <span className="font-semibold text-sm">
-                      #{p.jersey_number ?? "-"} {p.name}
+                      {joueurLabel(p)}
                     </span>
                     <span className="text-xs text-white/60 tabular-nums">
                       <b className="text-bsh-orange text-base">{b?.pts ?? 0}</b> pts · {b?.reb ?? 0} reb ·{" "}
@@ -739,11 +779,13 @@ export default function LiveControls({
               <QuickAddPanel
                 name={newPlayerName}
                 onNameChange={setNewPlayerName}
+              number={newPlayerNumber}
+              onNumberChange={setNewPlayerNumber}
                 onPick={(letter) => {
                   addPlayer(letter, selectedTeamId);
                 }}
                 onSubmit={() => {
-                  addPlayer(newPlayerName, selectedTeamId);
+                  addPlayer(newPlayerName, selectedTeamId, newPlayerNumber);
                 }}
                 error={addPlayerError}
               />
@@ -791,7 +833,7 @@ export default function LiveControls({
                     : "bg-white/10 text-white/80 hover:bg-white/20"
                 }`}
               >
-                #{p.jersey_number ?? "-"} {p.name}
+                {joueurLabel(p)}
               </button>
             ))}
             <button
@@ -806,11 +848,13 @@ export default function LiveControls({
             <QuickAddPanel
               name={newPlayerName}
               onNameChange={setNewPlayerName}
+              number={newPlayerNumber}
+              onNumberChange={setNewPlayerNumber}
               onPick={(letter) => {
                 addPlayer(letter, selectedTeamId).then((p) => p && setSelectedPlayerId(p.id));
               }}
               onSubmit={() => {
-                addPlayer(newPlayerName, selectedTeamId).then((p) => p && setSelectedPlayerId(p.id));
+                addPlayer(newPlayerName, selectedTeamId, newPlayerNumber).then((p) => p && setSelectedPlayerId(p.id));
               }}
               error={addPlayerError}
             />
@@ -905,7 +949,7 @@ export default function LiveControls({
                   const b = box[p.id];
                   return (
                     <tr key={p.id} className="border-b border-white/5">
-                      <td className="py-2 pr-2 whitespace-nowrap">#{p.jersey_number ?? "-"} {p.name}</td>
+                      <td className="py-2 pr-2 whitespace-nowrap">{joueurLabel(p)}</td>
                       <td className="py-1 px-1 text-center text-bsh-orange font-bold">{b.pts}</td>
                       <td className="py-1 px-1 text-center">{b.reb}</td>
                       <td className="py-1 px-1 text-center">{b.ast}</td>
